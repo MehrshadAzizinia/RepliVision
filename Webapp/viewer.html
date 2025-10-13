@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLY Point Cloud Viewer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            padding: 1rem;
+            border-bottom: 1px solid #ddd;
+            background-color: #f8f8f8;
+        }
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: 300px;
+            border-right: 1px solid #ddd;
+            padding: 1rem;
+            overflow-y: auto;
+            background-color: #fafafa;
+        }
+        #sidebar h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+        }
+        #file-list {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+        #file-list li {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            border: 1px solid transparent;
+        }
+        #file-list li:hover {
+            background-color: #e9e9e9;
+        }
+        #file-list li.active {
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+            border-color: #0069d9;
+        }
+        #viewer-container {
+            flex: 1;
+            position: relative;
+            background-color: #111; /* Dark background for better contrast */
+        }
+        canvas {
+            display: block;
+        }
+        #placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #888;
+            text-align: center;
+        }
+        /* Custom file input button */
+        .file-input-label {
+            display: inline-block;
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .file-input-label:hover {
+            background-color: #0056b3;
+        }
+        #file-input {
+            display: none; /* Hide the default input */
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>PLY Point Cloud Viewer</h1>
+        <label for="file-input" class="file-input-label">Choose Files or Folder</label>
+        <input type="file" id="file-input" multiple webkitdirectory directory>
+    </header>
+
+    <main>
+        <aside id="sidebar">
+            <h2>Loaded Files</h2>
+            <p id="no-files-message">Select a folder to begin.</p>
+            <ul id="file-list"></ul>
+        </aside>
+
+        <div id="viewer-container">
+            <div id="placeholder">
+                <h2>3D Viewer</h2>
+                <p>Select a file from the list to display it here.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Three.js CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, currentObject;
+        const fileInput = document.getElementById('file-input');
+        const fileListElement = document.getElementById('file-list');
+        const viewerContainer = document.getElementById('viewer-container');
+        const placeholder = document.getElementById('placeholder');
+        const noFilesMessage = document.getElementById('no-files-message');
+        
+        let plyFiles = [];
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111); // Dark background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, viewerContainer.clientWidth / viewerContainer.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 10);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(viewerContainer.clientWidth, viewerContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            viewerContainer.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // Lighting (less important for point clouds with vertex colors, but good to have)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+            scene.add(ambientLight);
+
+            animate();
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = viewerContainer.clientWidth / viewerContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(viewerContainer.clientWidth, viewerContainer.clientHeight);
+        }
+
+        function loadPlyFile(file, listItem) {
+            placeholder.style.display = 'block';
+            if (currentObject) {
+                scene.remove(currentObject);
+            }
+
+            document.querySelectorAll('#file-list li').forEach(el => el.classList.remove('active'));
+            listItem.classList.add('active');
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const contents = event.target.result;
+                const loader = new PLYLoader();
+                const geometry = loader.parse(contents);
+                
+                // *** KEY CHANGE IS HERE ***
+                // Instead of a mesh, we create a points object.
+                const material = new THREE.PointsMaterial({
+                    size: 0.005,        // Adjust this value to change the point size
+                    vertexColors: true // This tells Three.js to use the colors from the geometry
+                });
+
+                const points = new THREE.Points(geometry, material);
+                scene.add(points);
+                currentObject = points;
+
+                // Center camera on the object
+                const box = new THREE.Box3().setFromObject(points);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                
+                const fov = camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 1.5; // Zoom out a bit
+                
+                camera.position.copy(center);
+                camera.position.z += cameraZ;
+                controls.target.copy(center);
+                
+                controls.update();
+                placeholder.style.display = 'none';
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+        
+        fileInput.addEventListener('change', (event) => {
+            fileListElement.innerHTML = '';
+            plyFiles = [];
+
+            const files = event.target.files;
+            if (files.length === 0) return;
+
+            const filteredFiles = Array.from(files).filter(file => file.name.toLowerCase().endsWith('.ply'));
+            
+            if (filteredFiles.length > 0) {
+                noFilesMessage.style.display = 'none';
+            } else {
+                noFilesMessage.innerText = "No .ply files found in selection.";
+                noFilesMessage.style.display = 'block';
+                return;
+            }
+
+            filteredFiles.forEach((file, index) => {
+                plyFiles.push(file);
+                const listItem = document.createElement('li');
+                listItem.textContent = file.name;
+                listItem.addEventListener('click', () => loadPlyFile(file, listItem));
+                fileListElement.appendChild(listItem);
+                
+                if (index === 0) {
+                    loadPlyFile(file, listItem);
+                }
+            });
+        });
+
+        init();
+    </script>
+</body>
+</html>
