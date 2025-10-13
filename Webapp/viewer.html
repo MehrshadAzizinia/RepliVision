@@ -15,20 +15,33 @@
         }
         header {
             padding: 1rem;
-            border-bottom: 1px solid #ddd;
-            background-color: #f8f8f8;
+            border-bottom: 1px solid #e0e0e0;
+            background-color: #ffffff;
+            /* Add z-index to ensure header is on top */
+            position: relative;
+            z-index: 10;
         }
         main {
             display: flex;
             flex: 1;
             overflow: hidden;
+            /* Add position relative to contain the absolutely positioned sidebar */
+            position: relative;
         }
         #sidebar {
             width: 300px;
-            border-right: 1px solid #ddd;
             padding: 1rem;
             overflow-y: auto;
-            background-color: #fafafa;
+            /* ---- MODIFICATIONS START ---- */
+            position: absolute; /* Take sidebar out of normal document flow */
+            top: 0;
+            left: 0;
+            height: 100%; /* Make it full height of the main container */
+            z-index: 1;   /* Ensure sidebar is on top of the viewer */
+            background-color: rgba(255, 255, 255, 0.0); /* Semi-transparent background */
+            /* backdrop-filter: blur(5px); /* Frosted glass effect (optional) */
+            /*border-right: 1px solid rgba(255, 255, 255, 0.2); /* Lighter border */
+            /* ---- MODIFICATIONS END ---- */
         }
         #sidebar h2 {
             margin-top: 0;
@@ -47,13 +60,13 @@
             border: 1px solid transparent;
         }
         #file-list li:hover {
-            background-color: #e9e9e9;
+            background-color: rgba(255, 255, 255, 0.5);
         }
         #file-list li.active {
-            background-color: #007bff;
+            background-color: #62758f;
             color: white;
             font-weight: bold;
-            border-color: #0069d9;
+            border-color: #62758f;
         }
         #viewer-container {
             flex: 1;
@@ -68,14 +81,14 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #888;
+            color: #ffffff;
             text-align: center;
         }
         /* Custom file input button */
         .file-input-label {
             display: inline-block;
             padding: 10px 15px;
-            background-color: #007bff;
+            background-color: #62758f;
             color: white;
             border-radius: 5px;
             cursor: pointer;
@@ -125,7 +138,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 
         let scene, camera, renderer, controls, currentObject;
         const fileInput = document.getElementById('file-input');
@@ -139,7 +152,7 @@
         function init() {
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111111); // Dark background
+            scene.background = new THREE.Color(0xFFFFFF); // white background
 
             // Camera
             camera = new THREE.PerspectiveCamera(75, viewerContainer.clientWidth / viewerContainer.clientHeight, 0.1, 1000);
@@ -152,7 +165,7 @@
             viewerContainer.appendChild(renderer.domElement);
 
             // Controls
-            controls = new OrbitControls(camera, renderer.domElement);
+            controls = new ArcballControls(camera, renderer.domElement);
             controls.enableDamping = true;
 
             // Lighting (less important for point clouds with vertex colors, but good to have)
@@ -190,11 +203,9 @@
                 const loader = new PLYLoader();
                 const geometry = loader.parse(contents);
                 
-                // *** KEY CHANGE IS HERE ***
-                // Instead of a mesh, we create a points object.
                 const material = new THREE.PointsMaterial({
-                    size: 0.005,        // Adjust this value to change the point size
-                    vertexColors: true // This tells Three.js to use the colors from the geometry
+                    size: 0.005,
+                    vertexColors: true
                 });
 
                 const points = new THREE.Points(geometry, material);
