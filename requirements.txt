@@ -10,3 +10,4 @@ google-api-python-client==2.111.0
 
 # Data processing
 numpy==1.26.2
+requests
