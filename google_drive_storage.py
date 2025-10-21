@@ -1,4 +1,5 @@
 import os
+import struct
 import json
 import pickle
 import numpy as np
@@ -701,3 +702,216 @@ class GoogleDrivePointCloudStorage:
         except HttpError as error:
             print(f"An error occurred: {error}")
             return None
+    def store_ply_file(self, name, file_path, metadata=None):
+        """
+        Store a PLY file to Google Drive
+        
+        Args:
+            name: Unique identifier for the PLY file
+            file_path: Path to the .ply file
+            metadata: Optional dict with additional info
+        
+        Returns:
+            file_id: Google Drive file ID
+        """
+        print(f"Storing PLY file: {name}")
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Check if file already exists
+        existing_file_id = None
+        if name in self.metadata_cache:
+            existing_file_id = self.metadata_cache[name].get('file_id')
+        
+        try:
+            file_size = os.path.getsize(file_path)
+            print(f"File size: {file_size / (1024**2):.2f} MB")
+            
+            # Extract PLY metadata
+            ply_info = self._extract_ply_metadata(file_path)
+            
+            with open(file_path, 'rb') as f:
+                file_metadata = {
+                    'name': f"{name}.ply",
+                    'parents': [self.folder_id],
+                    'mimeType': 'application/octet-stream'
+                }
+                
+                # Use resumable upload for large files
+                from googleapiclient.http import MediaIoBaseUpload
+                media = MediaIoBaseUpload(
+                    f,
+                    mimetype='application/octet-stream',
+                    resumable=True,
+                    chunksize=1024*1024  # 1MB chunks
+                )
+                
+                if existing_file_id:
+                    print("Updating existing file...")
+                    file = self.service.files().update(
+                        fileId=existing_file_id,
+                        media_body=media
+                    ).execute()
+                    print("Update complete")
+                else:
+                    print("Uploading new file...")
+                    request = self.service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id, size'
+                    )
+                    
+                    response = None
+                    while response is None:
+                        status, response = request.next_chunk()
+                        if status:
+                            print(f"Upload progress: {int(status.progress() * 100)}%")
+                    
+                    file = response
+                    print("Upload complete")
+                
+                file_id = file['id']
+                
+                # Update metadata cache
+                self.metadata_cache[name] = {
+                    'file_id': file_id,
+                    'type': 'ply',
+                    'file_format': 'ply',
+                    'file_size': file.get('size', file_size),
+                    'file_size_mb': file_size / (1024**2),
+                    'created_at': datetime.now().isoformat(),
+                    'ply_info': ply_info,
+                    'custom_metadata': metadata or {}
+                }
+                
+                # Save metadata index
+                self._save_metadata()
+                
+                print(f"Successfully stored PLY file ({file_size / (1024**2):.2f} MB)")
+                return file_id
+        
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+
+    def _extract_ply_metadata(self, file_path):
+        """Extract metadata from PLY file header"""
+        try:
+            with open(file_path, 'rb') as f:
+                # Read header
+                line = f.readline().decode('ascii').strip()
+                if line != 'ply':
+                    return {'error': 'Not a valid PLY file'}
+                
+                format_type = None
+                vertex_count = 0
+                face_count = 0
+                properties = []
+                
+                while True:
+                    line = f.readline().decode('ascii').strip()
+                    
+                    if line.startswith('format'):
+                        format_type = line.split()[1]
+                    elif line.startswith('element vertex'):
+                        vertex_count = int(line.split()[2])
+                    elif line.startswith('element face'):
+                        face_count = int(line.split()[2])
+                    elif line.startswith('property'):
+                        properties.append(' '.join(line.split()[1:]))
+                    elif line == 'end_header':
+                        break
+                
+                # Check for color properties
+                has_color = any('red' in p or 'green' in p or 'blue' in p for p in properties)
+                has_normals = any('nx' in p or 'ny' in p or 'nz' in p for p in properties)
+                
+                return {
+                    'format': format_type,
+                    'vertex_count': vertex_count,
+                    'face_count': face_count,
+                    'has_color': has_color,
+                    'has_normals': has_normals,
+                    'properties': properties
+                }
+        
+        except Exception as e:
+            print(f"Could not extract PLY metadata: {e}")
+            return {}
+
+    def load_ply_file(self, name, output_path):
+        """
+        Download a PLY file from Google Drive
+        
+        Args:
+            name: Identifier of the PLY file
+            output_path: Where to save the downloaded file
+        
+        Returns:
+            output_path: Path to the downloaded file
+        """
+        print(f"Loading PLY file: {name}")
+        
+        if name not in self.metadata_cache:
+            raise ValueError(f"PLY file '{name}' not found")
+        
+        if self.metadata_cache[name].get('type') != 'ply':
+            raise ValueError(f"'{name}' is not a PLY file")
+        
+        file_id = self.metadata_cache[name]['file_id']
+        file_size_mb = self.metadata_cache[name].get('file_size_mb', 0)
+        
+        try:
+            print(f"Downloading {file_size_mb:.2f} MB...")
+            
+            from googleapiclient.http import MediaIoBaseDownload
+            request = self.service.files().get_media(fileId=file_id)
+            
+            # Expand ~ in path
+            output_path = os.path.expanduser(output_path)
+            
+            with open(output_path, 'wb') as f:
+                downloader = MediaIoBaseDownload(f, request, chunksize=1024*1024)
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+                    if status:
+                        print(f"Download progress: {int(status.progress() * 100)}%")
+            
+            print(f"Successfully downloaded to {output_path}")
+            return output_path
+        
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+
+    def list_ply_files(self):
+        """List all stored PLY files"""
+        return {k: v for k, v in self.metadata_cache.items() 
+                if v.get('type') == 'ply'}
+
+    # Usage example:
+    """
+    storage = GoogleDrivePointCloudStorage()
+
+    # Upload a PLY file
+    file_id = storage.store_ply_file(
+        name='my_scan',
+        file_path='/path/to/scan.ply',
+        metadata={'scanner': 'iPhone LiDAR', 'date': '2025-01-15'}
+    )
+
+    # Get shareable link for web viewer
+    link_info = storage.get_shareable_link('my_scan', anyone_can_view=True)
+    print(f"Direct download: {link_info['direct_link']}")
+
+    # Download PLY file
+    storage.load_ply_file('my_scan', '/path/to/output.ply')
+
+    # List all PLY files
+    ply_files = storage.list_ply_files()
+    for name, info in ply_files.items():
+        print(f"{name}: {info['ply_info']['vertex_count']} vertices")
+    """
+
