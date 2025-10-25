@@ -3,9 +3,22 @@ from flask_cors import CORS
 from google_drive_storage import GoogleDrivePointCloudStorage
 from io import BytesIO
 import os
+import logging
 
 app = Flask(__name__)
-CORS(app)
+
+# Enhanced CORS configuration
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
+
+# Enable logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Configure for large file uploads
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
@@ -23,15 +36,26 @@ def get_storage():
 @app.route('/', methods=['GET'])
 def index():
     """Health check"""
+    logger.info("Health check endpoint called")
     return jsonify({
         'status': 'running',
-        'message': 'Google Drive PLY API Server'
+        'message': 'Google Drive PLY API Server',
+        'version': '1.0',
+        'endpoints': [
+            'GET /',
+            'GET /api/list-ply-files',
+            'GET /api/download-ply/<name>',
+            'POST /api/upload-ply',
+            'DELETE /api/delete-ply/<name>',
+            'GET /api/storage-info'
+        ]
     })
 
 @app.route('/api/list-ply-files', methods=['GET'])
 def list_ply_files():
     """List all PLY files in Google Drive"""
     try:
+        logger.info("Listing PLY files...")
         storage = get_storage()
         ply_files = storage.list_ply_files()
         
@@ -51,6 +75,8 @@ def list_ply_files():
         
         files_list.sort(key=lambda x: x['created_at'], reverse=True)
         
+        logger.info(f"Found {len(files_list)} PLY files")
+        
         return jsonify({
             'success': True,
             'files': files_list,
@@ -58,7 +84,7 @@ def list_ply_files():
         })
     
     except Exception as e:
-        print(f"Error in list_ply_files: {e}")
+        logger.error(f"Error in list_ply_files: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/download-ply/<name>', methods=['GET'])
@@ -213,6 +239,14 @@ def storage_info():
         return jsonify({'success': True, 'storage': info})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.after_request
+def after_request(response):
+    """Add CORS headers to every response"""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
+    return response
 
 if __name__ == '__main__':
     print("="*60)

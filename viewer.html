@@ -495,6 +495,12 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a1a);  // Dark background for point clouds
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            
+            // Fix for upside-down models: flip the camera's sense of "up"
+            // The default is (0, 1, 0). By setting Y to -1, we effectively flip the camera's
+            // sense of "up", which will make models that appear upside down render correctly.
+            camera.up.set(0, -1, 0);
+            
             camera.position.z = 5;
             initialCameraPosition = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
             
@@ -598,7 +604,7 @@
                     showError('Failed to load file list: ' + data.error);
                 }
             } catch (error) {
-                showError('Cannot connect to server. Make sure Flask is running on http://localhost:5000');
+                showError('Cannot connect to server. Make sure Flask is running on http://localhost:8000');
                 updateConnectionStatus(false);
             }
         }

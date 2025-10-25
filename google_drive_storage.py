@@ -13,7 +13,8 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
 # If modifying these scopes, delete the file token.pickle
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+# Using drive scope to access existing files (not just app-created files)
+SCOPES = ['https://www.googleapis.com/auth/drive']
 
 class GoogleDrivePointCloudStorage:
     def __init__(self, credentials_file='credentials.json', token_file='token.pickle'):
@@ -886,8 +887,113 @@ class GoogleDrivePointCloudStorage:
             print(f"An error occurred: {e}")
             raise
 
+    def sync_existing_ply_files(self):
+        """
+        Scan the Google Drive folder for existing PLY files and add them to metadata cache
+        This is useful for finding PLY files that were uploaded outside of this app
+        """
+        try:
+            print("Scanning Google Drive folder for existing PLY files...")
+            
+            # Search for all .ply files in the folder
+            query = f"'{self.folder_id}' in parents and name contains '.ply' and trashed=false"
+            results = self.service.files().list(
+                q=query,
+                spaces='drive',
+                fields='files(id, name, size, createdTime, modifiedTime)',
+                pageSize=1000
+            ).execute()
+            
+            files = results.get('files', [])
+            new_files_count = 0
+            
+            for file in files:
+                file_name = file['name']
+                # Remove .ply extension for the key
+                name = file_name.replace('.ply', '')
+                
+                # Skip if already in metadata cache
+                if name in self.metadata_cache:
+                    continue
+                
+                print(f"Found new PLY file: {file_name}")
+                
+                # Try to extract PLY metadata by downloading header
+                ply_info = {}
+                try:
+                    # Download just the first 10KB to read the header
+                    request = self.service.files().get_media(fileId=file['id'])
+                    header_bytes = request.execute(num_retries=2)[:10000]
+                    
+                    # Parse header
+                    header_str = header_bytes.decode('ascii', errors='ignore')
+                    lines = header_str.split('\n')
+                    
+                    if lines[0].strip() == 'ply':
+                        format_type = None
+                        vertex_count = 0
+                        face_count = 0
+                        properties = []
+                        
+                        for line in lines:
+                            line = line.strip()
+                            if line.startswith('format'):
+                                format_type = line.split()[1]
+                            elif line.startswith('element vertex'):
+                                vertex_count = int(line.split()[2])
+                            elif line.startswith('element face'):
+                                face_count = int(line.split()[2])
+                            elif line.startswith('property'):
+                                properties.append(' '.join(line.split()[1:]))
+                            elif line == 'end_header':
+                                break
+                        
+                        has_color = any('red' in p or 'green' in p or 'blue' in p for p in properties)
+                        has_normals = any('nx' in p or 'ny' in p or 'nz' in p for p in properties)
+                        
+                        ply_info = {
+                            'format': format_type,
+                            'vertex_count': vertex_count,
+                            'face_count': face_count,
+                            'has_color': has_color,
+                            'has_normals': has_normals,
+                            'properties': properties
+                        }
+                except Exception as e:
+                    print(f"Could not extract metadata for {file_name}: {e}")
+                
+                # Add to metadata cache
+                file_size = int(file.get('size', 0))
+                self.metadata_cache[name] = {
+                    'file_id': file['id'],
+                    'type': 'ply',
+                    'file_format': 'ply',
+                    'file_size': file_size,
+                    'file_size_mb': file_size / (1024**2),
+                    'created_at': file.get('createdTime', datetime.now().isoformat()),
+                    'modified_at': file.get('modifiedTime', datetime.now().isoformat()),
+                    'ply_info': ply_info,
+                    'custom_metadata': {'synced_from_drive': True}
+                }
+                new_files_count += 1
+            
+            if new_files_count > 0:
+                print(f"Added {new_files_count} existing PLY files to metadata cache")
+                self._save_metadata()
+            else:
+                print("No new PLY files found")
+            
+            return new_files_count
+            
+        except HttpError as error:
+            print(f"An error occurred while syncing: {error}")
+            return 0
+
     def list_ply_files(self):
         """List all stored PLY files"""
+        # First sync any existing files from Drive
+        self.sync_existing_ply_files()
+        
         return {k: v for k, v in self.metadata_cache.items() 
                 if v.get('type') == 'ply'}
 
@@ -914,4 +1020,3 @@ class GoogleDrivePointCloudStorage:
     for name, info in ply_files.items():
         print(f"{name}: {info['ply_info']['vertex_count']} vertices")
     """
-
