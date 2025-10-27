@@ -13,6 +13,7 @@
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden; /* Prevent body scroll */
         }
         
         .header {
@@ -70,7 +71,7 @@
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
         
-        button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+        button:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
         
         .main-container {
             flex: 1;
@@ -134,6 +135,7 @@
             margin-bottom: 5px;
             font-size: 14px;
             padding-right: 30px;
+            word-break: break-all;
         }
         
         .file-info {
@@ -185,6 +187,7 @@
             border-radius: 8px;
             font-size: 13px;
             max-width: 250px;
+            pointer-events: none;
         }
         
         .info-panel h3 { margin-bottom: 10px; font-size: 16px; }
@@ -244,6 +247,7 @@
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             min-width: 250px;
+            z-index: 101;
         }
         
         .spinner {
@@ -426,19 +430,18 @@
             <div id="viewer"></div>
             <div class="info-panel" id="infoPanel" style="display: none;">
                 <h3>Model Info</h3>
+                <div class="info-item">Type: <span id="modelType">-</span></div>
                 <div class="info-item">Vertices: <span id="vertexCount">-</span></div>
                 <div class="info-item">Faces: <span id="faceCount">-</span></div>
                 <div class="info-item">Has Colors: <span id="hasColors">-</span></div>
-                <div class="info-item">File Size: <span id="fileSize">-</span></div>
             </div>
             
-            <!-- Zoom Controls -->
             <div class="zoom-controls" id="zoomControls">
                 <button class="zoom-btn" onclick="zoomIn()" title="Zoom In">+</button>
                 <button class="zoom-btn reset-btn" onclick="resetView()" title="Reset View">⟲</button>
                 <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
-                <button class="zoom-btn" onclick="increasePointSize()" title="Larger Points" style="font-size: 16px;">●+</button>
-                <button class="zoom-btn" onclick="decreasePointSize()" title="Smaller Points" style="font-size: 16px;">●−</button>
+                <button class="zoom-btn" id="increasePointsBtn" onclick="increasePointSize()" title="Larger Points" style="font-size: 16px;">●+</button>
+                <button class="zoom-btn" id="decreasePointsBtn" onclick="decreasePointSize()" title="Smaller Points" style="font-size: 16px;">●−</button>
             </div>
             
             <div class="loading" id="loading" style="display: none;">
@@ -464,115 +467,191 @@
         </div>
     </div>
 
+    <!-- THREE.JS CORE -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- THREE.JS EXTRA LOADERS AND CONTROLS (MUST MATCH CORE VERSION) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
     <script>
         const API_URL = 'http://localhost:8000';
-        let scene, camera, renderer, currentMesh, selectedFileName = null, fileToDelete = null;
-        let initialCameraPosition = { x: 0, y: 0, z: 5 };
-        let currentRotation = { x: 0, y: 0 };
-        let currentPointSize = 0.1;
-        
-        function increasePointSize() {
-            if (currentMesh && currentMesh.material && currentMesh.material.size !== undefined) {
-                currentPointSize = Math.min(1.0, currentPointSize * 1.2);
-                currentMesh.material.size = currentPointSize;
-                currentMesh.material.needsUpdate = true;
-                console.log('Point size:', currentPointSize);
-            }
-        }
-        
-        function decreasePointSize() {
-            if (currentMesh && currentMesh.material && currentMesh.material.size !== undefined) {
-                currentPointSize = Math.max(0.001, currentPointSize * 0.8);
-                currentMesh.material.size = currentPointSize;
-                currentMesh.material.needsUpdate = true;
-                console.log('Point size:', currentPointSize);
-            }
-        }
-        
+        let scene, camera, renderer, controls, currentObject;
+        let selectedFileName = null, fileToDelete = null;
+
         function initScene() {
             const container = document.getElementById('viewer');
+            
+            // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);  // Dark background for point clouds
+            scene.background = new THREE.Color(0x222222);
+            
+            // Camera
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            // CHANGE 1: Reverted camera position to standard default.
+            camera.position.set(0, 0, 5);
             
-            // Fix for upside-down models: flip the camera's sense of "up"
-            // The default is (0, 1, 0). By setting Y to -1, we effectively flip the camera's
-            // sense of "up", which will make models that appear upside down render correctly.
-            camera.up.set(0, -1, 0);
-            
-            camera.position.z = 5;
-            initialCameraPosition = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
-            
+            // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement);
             
-            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-            const light = new THREE.DirectionalLight(0xffffff, 0.6);
+            // Lights
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const light = new THREE.DirectionalLight(0xffffff, 0.8);
             light.position.set(10, 10, 10);
             scene.add(light);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
             
-            let isDragging = false, prevMouse = { x: 0, y: 0 };
-            renderer.domElement.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                prevMouse = { x: e.clientX, y: e.clientY };
-            });
-            renderer.domElement.addEventListener('mousemove', (e) => {
-                if (isDragging && currentMesh) {
-                    const deltaX = (e.clientX - prevMouse.x) * 0.01;
-                    const deltaY = (e.clientY - prevMouse.y) * 0.01;
-                    currentMesh.rotation.y += deltaX;
-                    currentMesh.rotation.x += deltaY;
-                    currentRotation.y = currentMesh.rotation.y;
-                    currentRotation.x = currentMesh.rotation.x;
-                    prevMouse = { x: e.clientX, y: e.clientY };
-                }
-            });
-            renderer.domElement.addEventListener('mouseup', () => isDragging = false);
-            renderer.domElement.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                camera.position.z = Math.max(0.5, Math.min(100, camera.position.z + e.deltaY * 0.01));
-            });
-            window.addEventListener('resize', () => {
-                camera.aspect = container.clientWidth / container.clientHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(container.clientWidth, container.clientHeight);
-            });
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            
             animate();
         }
         
+        function onWindowResize() {
+            const container = document.getElementById('viewer');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
         function animate() {
             requestAnimationFrame(animate);
+            controls.update(); // only required if controls.enableDamping = true
             renderer.render(scene, camera);
         }
-        
-        function zoomIn() {
-            camera.position.z = Math.max(0.5, camera.position.z - 0.5);
-        }
-        
-        function zoomOut() {
-            camera.position.z = Math.min(100, camera.position.z + 0.5);
-        }
-        
-        function resetView() {
-            // Reset camera position
-            camera.position.set(initialCameraPosition.x, initialCameraPosition.y, initialCameraPosition.z);
-            
-            // Reset mesh rotation
-            if (currentMesh) {
-                currentMesh.rotation.set(0, 0, 0);
-                currentRotation = { x: 0, y: 0 };
+
+        // --- Camera & View Controls ---
+        function zoomIn() { controls.dollyIn(1.2); }
+        function zoomOut() { controls.dollyOut(1.2); }
+        function resetView() { controls.reset(); }
+
+        function increasePointSize() {
+            if (currentObject && currentObject.isPoints) {
+                currentObject.material.size *= 1.2;
             }
         }
         
+        function decreasePointSize() {
+            if (currentObject && currentObject.isPoints) {
+                currentObject.material.size /= 1.2;
+            }
+        }
+        
+        function togglePointButtons(isPoints) {
+            document.getElementById('increasePointsBtn').disabled = !isPoints;
+            document.getElementById('decreasePointsBtn').disabled = !isPoints;
+        }
+
+        // --- File Loading & Display ---
+        async function loadPLYFile(fileName, event) {
+            showLoading(true, 'Downloading & Parsing PLY...');
+            clearError();
+            
+            if (currentObject) {
+                scene.remove(currentObject);
+                currentObject.geometry.dispose();
+                currentObject.material.dispose();
+                currentObject = null;
+            }
+
+            selectedFileName = fileName;
+            document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
+            event.currentTarget.classList.add('selected');
+
+            const loader = new THREE.PLYLoader();
+            const url = `${API_URL}/api/download-ply/${fileName}`;
+
+            loader.load(
+                url,
+                // onSuccess callback
+                function (geometry) {
+                    displayGeometry(geometry);
+                    showLoading(false);
+                },
+                // onProgress callback
+                function (xhr) {
+                    const percent = (xhr.loaded / xhr.total * 100);
+                    showLoading(true, `Loading model: ${Math.round(percent)}%`);
+                },
+                // onError callback
+                function (error) {
+                    console.error('An error happened during loading:', error);
+                    showError(`Failed to load PLY file. It may be corrupt or an unsupported format.`);
+                    showLoading(false);
+                }
+            );
+        }
+
+        function displayGeometry(geometry) {
+            // Center the geometry
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            geometry.center();
+
+            const hasColors = geometry.hasAttribute('color');
+            let object;
+            let modelType;
+
+            // CRITICAL: Check if the PLY is a point cloud (no faces) or a mesh
+            if (geometry.index === null) {
+                // It's a point cloud
+                modelType = 'Point Cloud';
+                const material = new THREE.PointsMaterial({
+                    vertexColors: hasColors,
+                    size: 0.05,
+                    sizeAttenuation: true
+                });
+                if (!hasColors) material.color.setHex(0x4a90e2);
+                object = new THREE.Points(geometry, material);
+                togglePointButtons(true);
+            } else {
+                // It's a mesh
+                modelType = 'Mesh';
+                geometry.computeVertexNormals();
+                const material = new THREE.MeshStandardMaterial({
+                    vertexColors: hasColors,
+                    side: THREE.DoubleSide,
+                    flatShading: true,
+                });
+                if (!hasColors) material.color.setHex(0xcccccc);
+                object = new THREE.Mesh(geometry, material);
+                togglePointButtons(false);
+            }
+
+           
+            object.rotation.x = -Math.PI;
+            
+            currentObject = object;
+            scene.add(currentObject);
+
+            // Frame the object in the camera view
+            const box = new THREE.Box3().setFromObject(currentObject);
+            const size = box.getSize(new THREE.Vector3()).length();
+            controls.reset();
+            camera.position.z = size * 1.5;
+            
+            // Update info panel
+            const vertexCount = geometry.attributes.position.count;
+            const faceCount = geometry.index ? geometry.index.count / 3 : 0;
+            document.getElementById('modelType').textContent = modelType;
+            document.getElementById('vertexCount').textContent = vertexCount.toLocaleString();
+            document.getElementById('faceCount').textContent = faceCount.toLocaleString();
+            document.getElementById('hasColors').textContent = hasColors ? 'Yes' : 'No';
+            document.getElementById('infoPanel').style.display = 'block';
+        }
+
+        // --- API & UI Functions (largely unchanged from original) ---
         async function checkConnection() {
             try {
                 const response = await fetch(`${API_URL}/`);
-                if (response.ok) {
-                    updateConnectionStatus(true);
-                    return true;
-                }
+                updateConnectionStatus(response.ok);
+                return response.ok;
             } catch (error) {
                 updateConnectionStatus(false);
                 return false;
@@ -611,7 +690,7 @@
         
         function displayFileList(files) {
             const fileList = document.getElementById('fileList');
-            if (files.length === 0) {
+            if (!files || files.length === 0) {
                 fileList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📦</div><div>No PLY files found</div></div>';
                 return;
             }
@@ -622,284 +701,13 @@
                         <button class="delete-btn" onclick="event.stopPropagation(); showDeleteModal('${name}');">×</button>
                         <div class="file-name">📄 ${file.display_name}</div>
                         <div class="file-info">
-                            ${file.vertex_count.toLocaleString()} vertices<br>
-                            ${file.face_count.toLocaleString()} faces<br>
+                            ${(file.vertex_count || 0).toLocaleString()} vertices<br>
+                            ${(file.face_count || 0).toLocaleString()} faces<br>
                             ${file.file_size_mb.toFixed(2)} MB${file.has_color ? ' • 🎨' : ''}
                         </div>
                     </div>
                 `;
             }).join('');
-        }
-        
-        async function loadPLYFile(name, event) {
-            showLoading(true, 'Loading 3D model...');
-            clearError();
-            selectedFileName = name;
-            
-            document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
-            if (event && event.currentTarget) event.currentTarget.classList.add('selected');
-            
-            try {
-                const response = await fetch(`${API_URL}/api/download-ply/${name}`);
-                if (!response.ok) throw new Error('Failed to download file');
-                
-                const arrayBuffer = await response.arrayBuffer();
-                const plyData = parsePLY(arrayBuffer);
-                displayPLY(plyData, arrayBuffer.byteLength);
-            } catch (error) {
-                showError(`Error loading file: ${error.message}`);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        function parsePLY(arrayBuffer) {
-            // Convert to text to read header
-            const decoder = new TextDecoder('ascii');
-            const headerText = decoder.decode(arrayBuffer.slice(0, Math.min(10000, arrayBuffer.byteLength)));
-            const lines = headerText.split('\n');
-            
-            if (!lines[0] || lines[0].trim() !== 'ply') {
-                throw new Error('Not a valid PLY file');
-            }
-            
-            let format = 'ascii';
-            let vertexCount = 0, faceCount = 0, headerEnd = 0;
-            let hasColor = false, hasNormals = false;
-            let properties = [];
-            
-            // Parse header
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                
-                if (line.startsWith('format')) {
-                    format = line.split(/\s+/)[1];
-                }
-                if (line.startsWith('element vertex')) {
-                    vertexCount = parseInt(line.split(/\s+/)[2]);
-                }
-                if (line.startsWith('element face')) {
-                    faceCount = parseInt(line.split(/\s+/)[2]);
-                }
-                if (line.startsWith('property')) {
-                    properties.push(line);
-                    if (line.includes('red') || line.includes('green')) hasColor = true;
-                    if (line.includes('nx') || line.includes('ny')) hasNormals = true;
-                }
-                if (line === 'end_header') {
-                    // Find byte position of end_header
-                    const headerBytes = new TextEncoder().encode(lines.slice(0, i + 1).join('\n') + '\n');
-                    headerEnd = headerBytes.length;
-                    break;
-                }
-            }
-            
-            console.log(`Format: ${format}, Vertices: ${vertexCount}, Faces: ${faceCount}`);
-            
-            if (format === 'ascii') {
-                return parsePLY_ASCII(arrayBuffer, headerEnd, vertexCount, faceCount, hasColor, properties);
-            } else if (format.startsWith('binary')) {
-                return parsePLY_Binary(arrayBuffer, headerEnd, vertexCount, faceCount, hasColor, hasNormals, format, properties);
-            } else {
-                throw new Error(`Unsupported PLY format: ${format}`);
-            }
-        }
-        
-        function parsePLY_ASCII(arrayBuffer, headerEnd, vertexCount, faceCount, hasColor, properties) {
-            const decoder = new TextDecoder('ascii');
-            const text = decoder.decode(arrayBuffer);
-            const lines = text.split('\n');
-            
-            // Find where header ends in lines
-            let lineStart = 0;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].trim() === 'end_header') {
-                    lineStart = i + 1;
-                    break;
-                }
-            }
-            
-            const vertices = [], colors = [], indices = [];
-            
-            // Parse vertices
-            for (let i = 0; i < vertexCount; i++) {
-                const parts = lines[lineStart + i].trim().split(/\s+/);
-                vertices.push(parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2]));
-                
-                if (hasColor && parts.length >= 6) {
-                    colors.push(parseInt(parts[3])/255, parseInt(parts[4])/255, parseInt(parts[5])/255);
-                }
-            }
-            
-            // Parse faces
-            const faceStart = lineStart + vertexCount;
-            for (let i = 0; i < faceCount; i++) {
-                const parts = lines[faceStart + i].trim().split(/\s+/);
-                const nVerts = parseInt(parts[0]);
-                if (nVerts === 3) {
-                    indices.push(parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]));
-                } else if (nVerts === 4) {
-                    const [v0,v1,v2,v3] = [parseInt(parts[1]),parseInt(parts[2]),parseInt(parts[3]),parseInt(parts[4])];
-                    indices.push(v0,v1,v2,v0,v2,v3);
-                }
-            }
-            
-            return {
-                vertices: new Float32Array(vertices),
-                colors: hasColor && colors.length ? new Float32Array(colors) : null,
-                indices: new Uint32Array(indices),
-                vertexCount: vertices.length / 3,
-                faceCount: indices.length / 3,
-                hasColor: hasColor && colors.length > 0
-            };
-        }
-        
-        function parsePLY_Binary(arrayBuffer, headerEnd, vertexCount, faceCount, hasColor, hasNormals, format, properties) {
-            const littleEndian = format.includes('little');
-            const view = new DataView(arrayBuffer, headerEnd);
-            
-            console.log('Parsing binary PLY...');
-            console.log('Properties:', properties);
-            
-            // Determine vertex format from properties
-            let vertexSize = 0;
-            let xOffset = 0, yOffset = 4, zOffset = 8;
-            let colorOffset = -1;
-            let normalOffset = -1;
-            
-            let currentOffset = 0;
-            for (let prop of properties) {
-                if (prop.includes('float') && prop.includes(' x')) {
-                    xOffset = currentOffset;
-                    currentOffset += 4;
-                } else if (prop.includes('float') && prop.includes(' y')) {
-                    yOffset = currentOffset;
-                    currentOffset += 4;
-                } else if (prop.includes('float') && prop.includes(' z')) {
-                    zOffset = currentOffset;
-                    currentOffset += 4;
-                } else if (prop.includes('float') && prop.includes('nx')) {
-                    normalOffset = currentOffset;
-                    currentOffset += 4;
-                } else if (prop.includes('float') && prop.includes('ny')) {
-                    currentOffset += 4;
-                } else if (prop.includes('float') && prop.includes('nz')) {
-                    currentOffset += 4;
-                } else if (prop.includes('uchar') && (prop.includes('red') || prop.includes('diffuse_red'))) {
-                    colorOffset = currentOffset;
-                    currentOffset += 1;
-                } else if (prop.includes('uchar') && (prop.includes('green') || prop.includes('diffuse_green'))) {
-                    currentOffset += 1;
-                } else if (prop.includes('uchar') && (prop.includes('blue') || prop.includes('diffuse_blue'))) {
-                    currentOffset += 1;
-                } else if (prop.includes('uchar') && (prop.includes('alpha') || prop.includes('diffuse_alpha'))) {
-                    currentOffset += 1;
-                } else if (prop.includes('float')) {
-                    currentOffset += 4;
-                } else if (prop.includes('uchar')) {
-                    currentOffset += 1;
-                } else if (prop.includes('int')) {
-                    currentOffset += 4;
-                }
-            }
-            
-            vertexSize = currentOffset;
-            console.log(`Vertex size: ${vertexSize} bytes, Color offset: ${colorOffset}`);
-            
-            const vertices = [];
-            const colors = [];
-            let offset = 0;
-            
-            // Parse vertices
-            for (let i = 0; i < vertexCount; i++) {
-                // Read x, y, z
-                const x = view.getFloat32(offset + xOffset, littleEndian);
-                const y = view.getFloat32(offset + yOffset, littleEndian);
-                const z = view.getFloat32(offset + zOffset, littleEndian);
-                vertices.push(x, y, z);
-                
-                // Read colors if present
-                if (colorOffset >= 0) {
-                    const r = view.getUint8(offset + colorOffset);
-                    const g = view.getUint8(offset + colorOffset + 1);
-                    const b = view.getUint8(offset + colorOffset + 2);
-                    colors.push(r/255, g/255, b/255);
-                }
-                
-                offset += vertexSize;
-            }
-            
-            console.log(`Parsed ${vertices.length/3} vertices, ${colors.length/3} colors`);
-            
-            // Parse faces
-            const indices = [];
-            for (let i = 0; i < faceCount; i++) {
-                const nVerts = view.getUint8(offset);
-                offset += 1;
-                
-                if (nVerts === 3) {
-                    const v0 = view.getInt32(offset, littleEndian);
-                    const v1 = view.getInt32(offset + 4, littleEndian);
-                    const v2 = view.getInt32(offset + 8, littleEndian);
-                    indices.push(v0, v1, v2);
-                    offset += 12;
-                } else if (nVerts === 4) {
-                    const v0 = view.getInt32(offset, littleEndian);
-                    const v1 = view.getInt32(offset + 4, littleEndian);
-                    const v2 = view.getInt32(offset + 8, littleEndian);
-                    const v3 = view.getInt32(offset + 12, littleEndian);
-                    indices.push(v0, v1, v2, v0, v2, v3);
-                    offset += 16;
-                } else {
-                    // Skip unsupported face types
-                    offset += nVerts * 4;
-                }
-            }
-            
-            console.log(`Parsed binary PLY: ${vertices.length/3} vertices, ${indices.length/3} faces, has colors: ${colors.length > 0}`);
-            
-            return {
-                vertices: new Float32Array(vertices),
-                colors: colors.length > 0 ? new Float32Array(colors) : null,
-                indices: new Uint32Array(indices),
-                vertexCount: vertices.length / 3,
-                faceCount: indices.length / 3,
-                hasColor: colors.length > 0
-            };
-        }
-        
-        function displayPLY(plyData, fileSize) {
-            if (currentMesh) scene.remove(currentMesh);
-            
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(plyData.vertices, 3));
-            if (plyData.indices.length) geometry.setIndex(new THREE.BufferAttribute(plyData.indices, 1));
-            if (plyData.colors) geometry.setAttribute('color', new THREE.BufferAttribute(plyData.colors, 3));
-            geometry.computeVertexNormals();
-            
-            const material = new THREE.MeshPhongMaterial({
-                vertexColors: plyData.hasColor,
-                side: THREE.DoubleSide
-            });
-            if (!plyData.hasColor) material.color.setHex(0x4a90e2);
-            
-            currentMesh = new THREE.Mesh(geometry, material);
-            scene.add(currentMesh);
-            
-            const bbox = geometry.boundingBox || geometry.computeBoundingBox();
-            const center = new THREE.Vector3();
-            geometry.boundingBox.getCenter(center);
-            currentMesh.position.sub(center);
-            
-            const size = geometry.boundingBox.getSize(new THREE.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
-            currentMesh.scale.setScalar(3 / maxDim);
-            
-            document.getElementById('vertexCount').textContent = plyData.vertexCount.toLocaleString();
-            document.getElementById('faceCount').textContent = plyData.faceCount.toLocaleString();
-            document.getElementById('hasColors').textContent = plyData.hasColor ? 'Yes' : 'No';
-            document.getElementById('fileSize').textContent = `${(fileSize / 1024 / 1024).toFixed(2)} MB`;
-            document.getElementById('infoPanel').style.display = 'block';
         }
         
         async function uploadFile() {
@@ -908,7 +716,7 @@
             if (!file) return;
             
             const sizeMB = file.size / (1024 * 1024);
-            if (sizeMB > 50 && !confirm(`File is ${sizeMB.toFixed(1)} MB. Large files may take time. Continue?`)) {
+            if (sizeMB > 100 && !confirm(`File is ${sizeMB.toFixed(1)} MB. Large files may take a while to upload. Continue?`)) {
                 fileInput.value = '';
                 return;
             }
@@ -953,15 +761,15 @@
                 xhr.addEventListener('load', () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
                         try { resolve(JSON.parse(xhr.responseText)); }
-                        catch (e) { reject(new Error('Invalid response')); }
+                        catch (e) { reject(new Error('Invalid server response')); }
                     } else {
                         try { reject(new Error(JSON.parse(xhr.responseText).error || 'Upload failed')); }
-                        catch (e) { reject(new Error(`Upload failed: ${xhr.status}`)); }
+                        catch (e) { reject(new Error(`Upload failed with status: ${xhr.status}`)); }
                     }
                 });
-                xhr.addEventListener('error', () => reject(new Error('Network error')));
+                xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
                 xhr.open('POST', `${API_URL}/api/upload-ply`);
-                xhr.timeout = 600000;
+                xhr.timeout = 600000; // 10 minutes
                 xhr.send(formData);
             });
         }
@@ -981,7 +789,7 @@
         async function confirmDelete() {
             if (!fileToDelete) return;
             closeDeleteModal();
-            showLoading(true, 'Deleting...');
+            showLoading(true, 'Deleting file...');
             
             try {
                 const response = await fetch(`${API_URL}/api/delete-ply/${fileToDelete}`, { method: 'DELETE' });
@@ -989,13 +797,13 @@
                 
                 if (data.success) {
                     if (selectedFileName === fileToDelete) {
-                        if (currentMesh) scene.remove(currentMesh);
-                        currentMesh = null;
+                        if (currentObject) scene.remove(currentObject);
+                        currentObject = null;
                         document.getElementById('infoPanel').style.display = 'none';
                         selectedFileName = null;
                     }
                     await refreshFileList();
-                    showError(`✅ ${fileToDelete}.ply deleted!`, false);
+                    showError(`✅ ${fileToDelete}.ply deleted successfully!`, false);
                 } else {
                     showError('Delete failed: ' + data.error);
                 }
@@ -1015,7 +823,7 @@
                     const s = data.storage;
                     document.getElementById('storageInfo').innerHTML = `
                         <div><strong>Google Drive Storage</strong></div>
-                        <div style="margin-top: 8px;">${s.used_gb.toFixed(2)} GB / ${s.total_gb.toFixed(2)} GB</div>
+                        <div style="margin-top: 8px;">${s.used_gb.toFixed(2)} GB / ${s.total_gb.toFixed(2)} GB used</div>
                         <div class="progress-bar"><div class="progress-fill" style="width: ${s.used_percentage.toFixed(1)}%"></div></div>
                     `;
                 }
@@ -1025,6 +833,7 @@
         }
         
         function refreshFileList() { loadFileList(); loadStorageInfo(); }
+        
         function setProgress(pct) {
             const bar = document.getElementById('uploadProgressBar');
             const fill = document.getElementById('uploadProgressFill');
@@ -1055,12 +864,14 @@
             const div = document.getElementById('errorMsg');
             const style = isError ? '' : 'background: #e8f5e9; color: #2e7d32;';
             div.innerHTML = `<div class="error" style="${style}">${msg}</div>`;
-            if (!isError) setTimeout(() => div.innerHTML = '', 3000);
+            if (!isError) {
+                setTimeout(() => { if (div.firstChild && div.firstChild.textContent === msg) div.innerHTML = ''; }, 5000);
+            }
         }
         
         function clearError() { document.getElementById('errorMsg').innerHTML = ''; }
         
-        // Initialize
+        // --- Initialization ---
         initScene();
         checkConnection().then(conn => { if (conn) refreshFileList(); });
         setInterval(checkConnection, 30000);
@@ -1068,6 +879,7 @@
         document.getElementById('deleteModal').addEventListener('click', function(e) {
             if (e.target === this) closeDeleteModal();
         });
+        togglePointButtons(false); // Disable point buttons initially
     </script>
 </body>
 </html>
