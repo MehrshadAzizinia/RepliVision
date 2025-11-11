@@ -1,3 +1,5 @@
+
+
 import os
 import struct
 import json
@@ -27,8 +29,14 @@ class GoogleDrivePointCloudStorage:
         """
         self.credentials_file = credentials_file
         self.token_file = token_file
+        
+        self.folder_name = 'PointClouds3D'
+        # The line below is removed as it assumes a mounted drive, which is incorrect
+        # for a general-purpose server and is the source of the error.
+        # self.root_folder_path = os.path.join('/content/drive/MyDrive', self.folder_name)
+
         self.service = self._authenticate()
-        self.folder_id = self._get_or_create_folder('PointClouds3D')
+        self.folder_id = self._get_or_create_folder(self.folder_name)
         self.metadata_file_id = self._get_or_create_metadata_file()
         self.metadata_cache = self._load_metadata()
     
@@ -703,6 +711,78 @@ class GoogleDrivePointCloudStorage:
         except HttpError as error:
             print(f"An error occurred: {error}")
             return None
+
+    def queue_command(self, command, filename='command_queue.txt'):
+        """
+        Appends a command to a specified file in the Google Drive folder using the API.
+        This method is safe and does not rely on a mounted filesystem.
+        
+        Args:
+            command: The string command to append.
+            filename: The name of the file to append to.
+        
+        Returns:
+            The file ID of the updated or created command file.
+        """
+        try:
+            # 1. Search for the command file
+            query = f"name='{filename}' and '{self.folder_id}' in parents and trashed=false"
+            results = self.service.files().list(
+                q=query,
+                spaces='drive',
+                fields='files(id, name)'
+            ).execute()
+            
+            items = results.get('files', [])
+            file_id = None
+            current_content = b''
+            
+            # 2. If file exists, download its content
+            if items:
+                file_id = items[0]['id']
+                request = self.service.files().get_media(fileId=file_id)
+                buffer = BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                current_content = buffer.getvalue()
+            
+            # 3. Prepare new content
+            if current_content and not current_content.endswith(b'\n'):
+                current_content += b'\n'
+            new_content = current_content + (command + '\n').encode('utf-8')
+            new_buffer = BytesIO(new_content)
+            
+            media = MediaIoBaseUpload(new_buffer, mimetype='text/plain', resumable=True)
+            
+            # 4. Update or create the file
+            if file_id:
+                # Update existing file
+                file = self.service.files().update(
+                    fileId=file_id,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+            else:
+                # Create new file
+                file_metadata = {
+                    'name': filename,
+                    'parents': [self.folder_id],
+                    'mimeType': 'text/plain'
+                }
+                file = self.service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+
+            return file['id']
+            
+        except HttpError as error:
+            print(f"An error occurred while queueing command: {error}")
+            raise
+    
     def store_ply_file(self, name, file_path, metadata=None):
         """
         Store a PLY file to Google Drive

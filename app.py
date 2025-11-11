@@ -1,3 +1,5 @@
+
+
 from flask import Flask, jsonify, send_file, request
 from flask_cors import CORS
 from google_drive_storage import GoogleDrivePointCloudStorage
@@ -33,6 +35,32 @@ def get_storage():
         storage = GoogleDrivePointCloudStorage()
     return storage
 
+@app.route('/api/queue-command', methods=['POST'])
+def queue_command():
+    """Receives a command and appends it to command_queue.txt inside the Drive folder."""
+    try:
+        data = request.get_json()
+        if not data or 'command' not in data:
+            return jsonify({'success': False, 'error': 'No command provided'}), 400
+
+        command = data['command']
+        
+        # --- CORRECTED LOGIC: Use the API, not the filesystem ---
+        storage = get_storage()
+        storage.queue_command(command)
+        # --- END OF CORRECTED LOGIC ---
+            
+        logger.info(f"Queued command to command_queue.txt via API: {command}")
+        
+        return jsonify({
+            'success': True,
+            'message': f"Command '{command}' was successfully queued."
+        })
+
+    except Exception as e:
+        logger.error(f"Error in queue_command: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
 @app.route('/', methods=['GET'])
 def index():
     """Health check"""
@@ -47,6 +75,7 @@ def index():
             'GET /api/download-ply/<name>',
             'POST /api/upload-ply',
             'DELETE /api/delete-ply/<name>',
+            'POST /api/queue-command',
             'GET /api/storage-info'
         ]
     })

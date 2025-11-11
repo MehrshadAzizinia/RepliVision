@@ -396,6 +396,7 @@
         <div class="controls">
             <button onclick="refreshFileList()">🔄 Refresh</button>
             <button onclick="document.getElementById('fileInput').click()">⬆️ Upload PLY</button>
+            <button onclick="queueCommand()">🤖 Queue Command</button>
             <span id="connectionStatus" style="margin-left: 10px; color: #666;"></span>
         </div>
         <div id="errorMsg"></div>
@@ -604,7 +605,7 @@
                 modelType = 'Point Cloud';
                 const material = new THREE.PointsMaterial({
                     vertexColors: hasColors,
-                    size: 0.05,
+                    size: 0.005,
                     sizeAttenuation: true
                 });
                 if (!hasColors) material.color.setHex(0x4a90e2);
@@ -815,6 +816,39 @@
             }
         }
         
+        async function queueCommand() {
+            const commandText = prompt("Enter the command to write to command_queue.txt:");
+
+            if (!commandText || commandText.trim() === '') {
+                return; // User cancelled or entered nothing
+            }
+
+            showLoading(true, 'Queuing command...');
+            clearError();
+
+            try {
+                const response = await fetch(`${API_URL}/api/queue-command`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ command: commandText.trim() }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showError('✅ Command successfully queued!', false);
+                } else {
+                    showError('Failed to queue command: ' + (data.error || 'Unknown server error'));
+                }
+            } catch (error) {
+                showError('Error sending command: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+
         async function loadStorageInfo() {
             try {
                 const response = await fetch(`${API_URL}/api/storage-info`);
