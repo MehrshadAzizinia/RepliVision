@@ -172,6 +172,10 @@
                 <label for="tableNumber">Table</label>
                 <input type="text" id="tableNumber" placeholder="Table number">
             </div>
+            <div class="form-group">
+                <label for="orderNotes">Notes (e.g., allergies, special requests)</label>
+                <textarea id="orderNotes" placeholder="Enter any special notes or allergies..." style="width: 100%; padding: 6px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px; border-radius: 3px; min-height: 60px; resize: vertical; font-family: inherit;"></textarea>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <strong style="font-size: 14px; color: #fff; font-weight: 400;">Total: $<span id="cartTotal">0.00</span></strong>
             </div>
@@ -777,6 +781,7 @@
 
         async function submitOrder() {
             const tableNumber = document.getElementById('tableNumber').value.trim();
+            const orderNotes = document.getElementById('orderNotes').value.trim();
             if (!tableNumber) {
                 alert('Please enter your table number.');
                 return;
@@ -791,7 +796,8 @@
                 tableNumber: tableNumber,
                 items: [...cart],
                 total: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-                timestamp: new Date().toLocaleString()
+                timestamp: new Date().toLocaleString(),
+                notes: orderNotes
             };
 
             // Save order to server
@@ -803,6 +809,7 @@
                 updateCartUI();
                 closeCartModal();
                 document.getElementById('tableNumber').value = '';
+                document.getElementById('orderNotes').value = '';
                 showError(`✅ Order submitted for Table ${tableNumber}!`, false);
                 
                 // Refresh orders list to show the new order
@@ -928,6 +935,7 @@
                                 <div>${item.quantity}x ${item.displayName} - $${(item.price * item.quantity).toFixed(2)}</div>
                             `).join('')}
                         </div>
+                        ${order.notes ? `<div style="margin-top: 8px; padding: 8px; background: #444; border-left: 3px solid #f39c12; border-radius: 3px; font-size: 11px; color: #fff;"><strong>📝 Notes:</strong> ${order.notes}</div>` : ''}
                         <div class="order-total">Total: $${order.total.toFixed(2)}</div>
                     </div>
                 `).join('');
