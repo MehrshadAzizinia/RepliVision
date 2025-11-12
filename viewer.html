@@ -61,6 +61,14 @@
         .btn-cancel { background: #9e9e9e; } .btn-cancel:hover { background: #757575; }
         .btn-save, .btn-delete { background: #2ecc71; } .btn-save:hover, .btn-delete:hover { background: #27ae60; }
         .btn-delete { background: #e74c3c; } .btn-delete:hover { background: #c0392b; }
+        .action-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
+        .upload-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
+        .cart-btn { background: #9b59b6; color: white; } .cart-btn:hover { background: #8e44ad; }
+        .order-item { background: #f8f9fa; padding: 15px; margin-bottom: 10px; border-radius: 8px; border-left: 4px solid #9b59b6; }
+        .order-header { font-weight: bold; margin-bottom: 10px; color: #333; }
+        .order-items { margin-bottom: 10px; }
+        .order-total { font-weight: bold; color: #27ae60; }
+        .remove-order-btn { background: #e74c3c; color: white; padding: 5px 10px; border-radius: 4px; border: none; cursor: pointer; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -71,6 +79,9 @@
         </h1>
         <div class="controls">
             <button onclick="refreshMenuList()">🔄 Refresh Menu</button>
+            <button id="modeToggleBtn" onclick="toggleMode()" style="background: #f39c12;">👤 Menu Mode</button>
+            <button onclick="showCartModal()" style="background: #9b59b6;">🛒 Cart (<span id="cartCount">0</span>)</button>
+            <button onclick="showOrdersModal()" style="background: #34495e;">📋 View Orders</button>
             <span id="connectionStatus" style="margin-left: 10px; color: #666;"></span>
         </div>
         <div id="errorMsg"></div>
@@ -84,7 +95,7 @@
             </div>
             <div class="upload-section">
                 <input type="file" id="fileInput" accept=".ply" onchange="uploadFile()">
-                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()" ${!isManagerMode ? 'disabled' : ''}>
                     ⬆️ Add New Item (Upload PLY)
                 </button>
             </div>
@@ -134,6 +145,63 @@
         </div>
     </div>
 
+    <!-- Cart Modal -->
+    <div class="modal" id="cartModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <h3>🛒 Shopping Cart</h3>
+            <div id="cartItems" style="max-height: 300px; overflow-y: auto; margin-bottom: 20px;">
+                <div class="empty-state">Your cart is empty</div>
+            </div>
+            <div class="form-group">
+                <label for="tableNumber">Table Number</label>
+                <input type="text" id="tableNumber" placeholder="Enter your table number">
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <strong style="font-size: 18px;">Total: $<span id="cartTotal">0.00</span></strong>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeCartModal()">Close</button>
+                <button class="btn-save" onclick="submitOrder()">Submit Order</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orders Modal -->
+    <div class="modal" id="ordersModal">
+        <div class="modal-content" style="max-width: 700px;">
+            <h3>📋 All Orders</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span style="color: #666; font-size: 14px;">Click "Refresh Orders" to get the latest data from Google Drive</span>
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="debugOrders()" style="background: #e74c3c; font-size: 12px; padding: 8px 16px;">🔍 Debug</button>
+                    <button onclick="refreshOrders()" style="background: #3498db; font-size: 12px; padding: 8px 16px;">🔄 Refresh Orders</button>
+                </div>
+            </div>
+            <div id="ordersList" style="max-height: 400px; overflow-y: auto;">
+                <div class="empty-state">Loading orders...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeOrdersModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manager Password Modal -->
+    <div class="modal" id="passwordModal">
+        <div class="modal-content">
+            <h3>🔐 Manager Mode</h3>
+            <p style="margin-bottom: 20px; color: #666;">Enter password to enable manager features:</p>
+            <div class="form-group">
+                <label for="passwordInput">Password</label>
+                <input type="password" id="passwordInput" placeholder="Enter password" onkeypress="if(event.key==='Enter') validatePassword()">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closePasswordModal()">Cancel</button>
+                <button class="btn-save" onclick="validatePassword()">Unlock</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -142,6 +210,127 @@
         const API_URL = 'http://localhost:8000';
         let scene, camera, renderer, controls, currentObject;
         let selectedBaseName = null, fileToDelete = null, itemToEdit = null;
+        let isManagerMode = false;
+        const MANAGER_PASSWORD = '123';
+        let cart = [];
+        let orders = [];
+
+        // Orders management functions
+        async function loadOrdersFromServer() {
+            try {
+                const response = await fetch(`${API_URL}/api/orders`);
+                const result = await response.json();
+                if (result.success) {
+                    orders = result.orders;
+                    console.log(`Loaded ${orders.length} orders from server`);
+                } else {
+                    console.error('Failed to load orders:', result.error);
+                    orders = [];
+                }
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                orders = [];
+            }
+        }
+
+        async function saveOrderToServer(order) {
+            try {
+                const response = await fetch(`${API_URL}/api/orders`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(order)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log('Order saved to server successfully');
+                    return true;
+                } else {
+                    console.error('Failed to save order:', result.error);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error saving order:', error);
+                return false;
+            }
+        }
+
+        async function deleteOrderFromServer(orderId) {
+            try {
+                const response = await fetch(`${API_URL}/api/orders/${orderId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log('Order deleted from server successfully');
+                    return true;
+                } else {
+                    console.error('Failed to delete order:', result.error);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error deleting order:', error);
+                return false;
+            }
+        }
+
+        function toggleMode() {
+            if (isManagerMode) {
+                // Switch to menu mode
+                isManagerMode = false;
+                updateModeUI();
+            } else {
+                // Try to switch to manager mode - show password modal
+                showPasswordModal();
+            }
+        }
+
+        function showPasswordModal() {
+            document.getElementById('passwordInput').value = '';
+            document.getElementById('passwordModal').classList.add('show');
+            document.getElementById('passwordInput').focus();
+        }
+
+        function closePasswordModal() {
+            document.getElementById('passwordModal').classList.remove('show');
+        }
+
+        function validatePassword() {
+            const password = document.getElementById('passwordInput').value;
+            if (password === MANAGER_PASSWORD) {
+                isManagerMode = true;
+                updateModeUI();
+                closePasswordModal();
+                showError('✅ Manager mode enabled!', false);
+            } else {
+                alert('Incorrect password. Access denied.');
+                document.getElementById('passwordInput').value = '';
+                document.getElementById('passwordInput').focus();
+            }
+        }
+
+        function updateModeUI() {
+            const modeBtn = document.getElementById('modeToggleBtn');
+            const uploadBtn = document.querySelector('.upload-btn');
+            const fileInput = document.getElementById('fileInput');
+            
+            if (isManagerMode) {
+                modeBtn.innerHTML = '👨‍💼 Manager Mode';
+                modeBtn.style.background = '#e74c3c';
+                uploadBtn.disabled = false;
+                fileInput.disabled = false;
+            } else {
+                modeBtn.innerHTML = '👤 Menu Mode';
+                modeBtn.style.background = '#f39c12';
+                uploadBtn.disabled = true;
+                fileInput.disabled = true;
+            }
+            
+            // Refresh the menu list to show/hide edit buttons and update orders UI
+            loadMenuList();
+            updateOrdersUI();
+        }
 
         function initScene() {
             const container = document.getElementById('viewer');
@@ -225,8 +414,13 @@
                             </div>
                         </div>
                         <div class="item-actions">
-                            <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price})">✏️</button>
-                            <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">🗑️</button>
+                            ${!isManagerMode ? `
+                                <button class="action-btn cart-btn" title="Add to Cart" onclick="event.stopPropagation(); addToCart('${safeBaseName}', '${safeDisplayName}', ${item.price})">🛒</button>
+                            ` : ''}
+                            ${isManagerMode ? `
+                                <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price})">✏️</button>
+                                <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">🗑️</button>
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -271,6 +465,10 @@
         }
 
         async function uploadFile() {
+            if (!isManagerMode) {
+                alert('Uploading requires manager mode. Please switch to manager mode first.');
+                return;
+            }
             const file = document.getElementById('fileInput').files[0];
             if (!file) return;
             showLoading(true, `Uploading ${file.name}...`);
@@ -294,6 +492,10 @@
         }
         
         function showDeleteModal(baseName, displayName) {
+            if (!isManagerMode) {
+                alert('Deleting requires manager mode. Please switch to manager mode first.');
+                return;
+            }
             fileToDelete = baseName;
             document.getElementById('deleteFileName').textContent = `'${displayName}'`;
             document.getElementById('deleteModal').classList.add('show');
@@ -316,6 +518,10 @@
         }
 
         function showEditModal(baseName, currentName, currentPrice) {
+            if (!isManagerMode) {
+                alert('Editing requires manager mode. Please switch to manager mode first.');
+                return;
+            }
             itemToEdit = baseName;
             document.getElementById('editItemName').value = currentName;
             document.getElementById('editItemPrice').value = currentPrice.toFixed(2);
@@ -377,11 +583,257 @@
             div.innerHTML = `<div class="error" style="${style}">${msg}</div>`;
             if (!isError) setTimeout(() => { if (div.firstChild && div.firstChild.textContent === msg) div.innerHTML = ''; }, 5000);
         }
+
+        // Cart Functions
+        function addToCart(baseName, displayName, price) {
+            const existingItem = cart.find(item => item.baseName === baseName);
+            if (existingItem) {
+                existingItem.quantity++;
+            } else {
+                cart.push({ baseName, displayName, price, quantity: 1 });
+            }
+            updateCartUI();
+            showError(`✅ ${displayName} added to cart!`, false);
+        }
+
+        function removeFromCart(baseName) {
+            cart = cart.filter(item => item.baseName !== baseName);
+            updateCartUI();
+        }
+
+        function updateCartQuantity(baseName, change) {
+            const item = cart.find(item => item.baseName === baseName);
+            if (item) {
+                item.quantity += change;
+                if (item.quantity <= 0) {
+                    removeFromCart(baseName);
+                } else {
+                    updateCartUI();
+                }
+            }
+        }
+
+        function updateCartUI() {
+            const cartCount = document.getElementById('cartCount');
+            const cartItems = document.getElementById('cartItems');
+            const cartTotal = document.getElementById('cartTotal');
+            
+            const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+            cartCount.textContent = totalItems;
+            
+            if (cart.length === 0) {
+                cartItems.innerHTML = '<div class="empty-state">Your cart is empty</div>';
+                cartTotal.textContent = '0.00';
+            } else {
+                cartItems.innerHTML = cart.map(item => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f8f9fa; margin-bottom: 8px; border-radius: 6px;">
+                        <div>
+                            <div style="font-weight: 600;">${item.displayName}</div>
+                            <div style="color: #666; font-size: 14px;">$${item.price.toFixed(2)} each</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button onclick="updateCartQuantity('${item.baseName}', -1)" style="width: 24px; height: 24px; border: none; background: #e74c3c; color: white; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;">-</button>
+                            <span style="font-weight: 600; min-width: 20px; text-align: center;">${item.quantity}</span>
+                            <button onclick="updateCartQuantity('${item.baseName}', 1)" style="width: 24px; height: 24px; border: none; background: #2ecc71; color: white; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;">+</button>
+                            <button onclick="removeFromCart('${item.baseName}')" style="width: 24px; height: 24px; border: none; background: #95a5a6; color: white; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">×</button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                cartTotal.textContent = total.toFixed(2);
+            }
+        }
+
+        function showCartModal() {
+            document.getElementById('cartModal').classList.add('show');
+            updateCartUI();
+        }
+
+        function closeCartModal() {
+            document.getElementById('cartModal').classList.remove('show');
+        }
+
+        async function submitOrder() {
+            const tableNumber = document.getElementById('tableNumber').value.trim();
+            if (!tableNumber) {
+                alert('Please enter your table number.');
+                return;
+            }
+            if (cart.length === 0) {
+                alert('Your cart is empty.');
+                return;
+            }
+
+            const order = {
+                id: Date.now(),
+                tableNumber: tableNumber,
+                items: [...cart],
+                total: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+                timestamp: new Date().toLocaleString()
+            };
+
+            // Save order to server
+            const saved = await saveOrderToServer(order);
+            if (saved) {
+                // Add to local array for immediate UI update
+                orders.push(order);
+                cart = [];
+                updateCartUI();
+                closeCartModal();
+                document.getElementById('tableNumber').value = '';
+                showError(`✅ Order submitted for Table ${tableNumber}!`, false);
+                
+                // Refresh orders list to show the new order
+                await loadOrdersFromServer();
+                updateOrdersUI();
+            } else {
+                alert('Failed to save order. Please try again.');
+            }
+        }
+
+        // Orders Functions
+        async function showOrdersModal() {
+            document.getElementById('ordersModal').classList.add('show');
+            // Load latest orders from server
+            await loadOrdersFromServer();
+            updateOrdersUI();
+        }
+
+        function closeOrdersModal() {
+            document.getElementById('ordersModal').classList.remove('show');
+        }
+
+        async function refreshOrders() {
+            // Show loading state
+            const ordersList = document.getElementById('ordersList');
+            ordersList.innerHTML = '<div class="empty-state">Refreshing orders from Google Drive...</div>';
+            
+            // Force reload orders from server
+            await loadOrdersFromServer();
+            updateOrdersUI();
+            showError('✅ Orders refreshed from Google Drive!', false);
+        }
+
+        async function debugOrders() {
+            try {
+                const response = await fetch(`${API_URL}/api/debug/orders`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Create a detailed debug view
+                    let debugContent = `
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 12px;">
+                            <h4>🔍 Debug Information</h4>
+                            <p><strong>File Found:</strong> ${result.found_file ? 'Yes' : 'No'}</p>
+                    `;
+                    
+                    if (result.found_file) {
+                        debugContent += `
+                            <p><strong>File ID:</strong> ${result.file_info.id}</p>
+                            <p><strong>Modified:</strong> ${new Date(result.file_info.modifiedTime).toLocaleString()}</p>
+                            <p><strong>Size:</strong> ${result.file_info.size_bytes} bytes</p>
+                            <p><strong>Content Length:</strong> ${result.content_length} characters</p>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #3498db;">Raw Content (click to expand)</summary>
+                                <pre style="background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${result.raw_content}</pre>
+                            </details>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #3498db;">Parsed Content (click to expand)</summary>
+                                <pre style="background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(result.parsed_content, null, 2)}</pre>
+                            </details>
+                        `;
+                    } else {
+                        debugContent += `<p><strong>Message:</strong> ${result.message}</p>`;
+                    }
+                    
+                    debugContent += '</div>';
+                    
+                    // Show debug modal
+                    const debugModal = document.createElement('div');
+                    debugModal.className = 'modal show';
+                    debugModal.style.zIndex = '2000';
+                    debugModal.innerHTML = `
+                        <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                            <h3>🔍 Orders Debug Information</h3>
+                            ${debugContent}
+                            <div class="modal-buttons">
+                                <button class="btn-cancel" onclick="this.closest('.modal').remove()">Close</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(debugModal);
+                    
+                } else {
+                    alert('Debug failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Debug error: ' + error.message);
+            }
+        }
+
+        async function removeOrder(orderId) {
+            if (!isManagerMode) {
+                alert('Removing orders requires manager mode.');
+                return;
+            }
+            
+            // Delete from server
+            const deleted = await deleteOrderFromServer(orderId);
+            if (deleted) {
+                // Remove from local array for immediate UI update
+                orders = orders.filter(order => order.id !== orderId);
+                updateOrdersUI();
+                showError('✅ Order removed!', false);
+            } else {
+                alert('Failed to remove order. Please try again.');
+            }
+        }
+
+        function updateOrdersUI() {
+            const ordersList = document.getElementById('ordersList');
+            
+            if (orders.length === 0) {
+                ordersList.innerHTML = '<div class="empty-state">No orders found</div>';
+            } else {
+                ordersList.innerHTML = orders.map(order => `
+                    <div class="order-item">
+                        <div class="order-header">
+                            Order #${order.id} - Table ${order.tableNumber} - ${order.timestamp}
+                            ${isManagerMode ? `<button class="remove-order-btn" onclick="removeOrder(${order.id})">Remove</button>` : ''}
+                        </div>
+                        <div class="order-items">
+                            ${order.items.map(item => `
+                                <div>${item.quantity}x ${item.displayName} - $${(item.price * item.quantity).toFixed(2)}</div>
+                            `).join('')}
+                        </div>
+                        <div class="order-total">Total: $${order.total.toFixed(2)}</div>
+                    </div>
+                `).join('');
+            }
+        }
         
         // --- Initialization ---
         initScene();
-        checkConnection().then(conn => { if (conn) refreshMenuList(); });
+        checkConnection().then(async conn => { 
+            if (conn) {
+                refreshMenuList();
+                // Load orders from server
+                await loadOrdersFromServer();
+                // Initialize UI in menu mode
+                updateModeUI();
+            }
+        });
         setInterval(checkConnection, 30000);
+        
+        // Auto-refresh orders every 10 seconds for all users
+        setInterval(async () => {
+            if (document.getElementById('ordersModal').classList.contains('show')) {
+                // Only refresh if orders modal is open to avoid unnecessary API calls
+                await loadOrdersFromServer();
+                updateOrdersUI();
+            }
+        }, 10000);
     </script>
 </body>
 </html>
