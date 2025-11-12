@@ -6,11 +6,21 @@
     <title>3D Item Menu Browser</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; border-radius: 4px; }
+        .main-wrapper {
+            width: 100%;
+            height: 100vh;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a1a;
             color: #fff;
             min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+            margin: 0;
+            padding: 0;
         }
         .header { background: #2a2a2a; padding: 8px; border-bottom: 1px solid #444; border-radius: 4px 4px 0 0; }
         .header h1 { color: #fff; font-size: 14px; margin-bottom: 6px; font-weight: 300; }
@@ -72,7 +82,8 @@
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="main-wrapper">
+        <div class="header">
         <h1>
             <span class="status-indicator" id="statusIndicator"></span>
             Menu Browser
@@ -112,6 +123,7 @@
                 <div id="loadingMessage">Loading...</div>
             </div>
         </div>
+        </div>
     </div>
     
     <!-- Delete Confirmation Modal -->
@@ -137,6 +149,10 @@
             <div class="form-group">
                 <label for="editItemPrice">Price ($)</label>
                 <input type="number" id="editItemPrice" placeholder="0.00" step="0.01">
+            </div>
+            <div class="form-group">
+                <label for="editItemCategory">Category</label>
+                <input type="text" id="editItemCategory" placeholder="e.g., Main Course, Beverage, Dessert">
             </div>
             <div class="modal-buttons">
                 <button class="btn-cancel" onclick="closeEditModal()">Cancel</button>
@@ -397,34 +413,68 @@
                 fileList.innerHTML = `<div class="empty-state">No items found. Upload a .PLY file to create one.</div>`;
                 return;
             }
-            fileList.innerHTML = items.map(item => {
-                const price = typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : 'N/A';
-                // Escape quotes for onclick handlers
-                const safeDisplayName = item.display_name.replace(/'/g, "\\'");
-                const safeBaseName = item.base_name.replace(/'/g, "\\'");
+            
+            // Group items by category
+            const itemsByCategory = {};
+            items.forEach(item => {
+                const category = item.category || 'Uncategorized';
+                if (!itemsByCategory[category]) {
+                    itemsByCategory[category] = [];
+                }
+                itemsByCategory[category].push(item);
+            });
+            
+            // Sort categories alphabetically
+            const sortedCategories = Object.keys(itemsByCategory).sort();
+            
+            // Generate HTML with category sections
+            let html = '';
+            sortedCategories.forEach(category => {
+                const categoryItems = itemsByCategory[category];
+                html += `
+                    <div class="category-section" style="margin-bottom: 16px;">
+                        <div class="category-header" style="background: #444; color: #fff; padding: 8px 12px; font-weight: 400; font-size: 13px; border-radius: 3px; margin-bottom: 4px; border: 1px solid #555;">
+                            📁 ${category} (${categoryItems.length})
+                        </div>
+                        <div class="category-items">
+                `;
+                
+                categoryItems.forEach(item => {
+                    const price = typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : 'N/A';
+                    // Escape quotes for onclick handlers
+                    const safeDisplayName = item.display_name.replace(/'/g, "\\'");
+                    const safeBaseName = item.base_name.replace(/'/g, "\\'");
 
-                return `
-                    <div class="file-item" id="item-${safeBaseName}" onclick="loadPLYFile('${safeBaseName}', this)">
-                        <div class="item-preview">□</div>
-                        <div class="item-details">
-                            <div class="item-name">${item.display_name}</div>
-                            <div class="item-price">${price}</div>
-                            <div class="item-info">
-                                ${item.vertex_count.toLocaleString()} verts &bull; ${item.file_size_mb.toFixed(2)} MB
+                    html += `
+                        <div class="file-item" id="item-${safeBaseName}" onclick="loadPLYFile('${safeBaseName}', this)" style="margin-left: 12px;">
+                            <div class="item-preview">□</div>
+                            <div class="item-details">
+                                <div class="item-name">${item.display_name}</div>
+                                <div class="item-price">${price}</div>
+                                <div class="item-info">
+                                    ${item.vertex_count.toLocaleString()} verts &bull; ${item.file_size_mb.toFixed(2)} MB
+                                </div>
+                            </div>
+                            <div class="item-actions">
+                                ${!isManagerMode ? `
+                                    <button class="action-btn cart-btn" title="Add to Cart" onclick="event.stopPropagation(); addToCart('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
+                                ` : ''}
+                                ${isManagerMode ? `
+                                    <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price}, '${item.category || 'Uncategorized'}')">✏️</button>
+                                    <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">×</button>
+                                ` : ''}
                             </div>
                         </div>
-                        <div class="item-actions">
-                            ${!isManagerMode ? `
-                                <button class="action-btn cart-btn" title="Add to Cart" onclick="event.stopPropagation(); addToCart('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
-                            ` : ''}
-                            ${isManagerMode ? `
-                                <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price})">✏️</button>
-                                <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">×</button>
-                            ` : ''}
+                    `;
+                });
+                
+                html += `
                         </div>
                     </div>
                 `;
-            }).join('');
+            });
+            
+            fileList.innerHTML = html;
         }
 
         async function loadPLYFile(baseName, element) {
@@ -562,7 +612,7 @@
             finally { showLoading(false); }
         }
 
-        function showEditModal(baseName, currentName, currentPrice) {
+        function showEditModal(baseName, currentName, currentPrice, currentCategory) {
             if (!isManagerMode) {
                 alert('Editing requires manager mode. Please switch to manager mode first.');
                 return;
@@ -570,6 +620,7 @@
             itemToEdit = baseName;
             document.getElementById('editItemName').value = currentName;
             document.getElementById('editItemPrice').value = currentPrice.toFixed(2);
+            document.getElementById('editItemCategory').value = currentCategory || 'Uncategorized';
             document.getElementById('editModal').classList.add('show');
         }
         function closeEditModal() { document.getElementById('editModal').classList.remove('show'); itemToEdit = null; }
@@ -583,6 +634,7 @@
 
             const newName = document.getElementById('editItemName').value.trim();
             const newPrice = parseFloat(document.getElementById('editItemPrice').value);
+            const newCategory = document.getElementById('editItemCategory').value.trim() || 'Uncategorized';
             
             if (!newName || isNaN(newPrice) || newPrice < 0) {
                 alert('Please enter a valid name and a non-negative price.');
@@ -597,7 +649,7 @@
                 const response = await fetch(`${API_URL}/api/update-item/${itemBaseNameToUpdate}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: newName, price: newPrice })
+                    body: JSON.stringify({ name: newName, price: newPrice, category: newCategory })
                 });
                 const data = await response.json();
                 if (data.success) {
@@ -893,5 +945,6 @@
             }
         }, 10000);
     </script>
+    </div>
 </body>
 </html>
