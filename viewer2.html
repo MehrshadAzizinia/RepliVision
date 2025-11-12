@@ -362,6 +362,13 @@
             light.position.set(10, 10, 10);
             scene.add(light);
             controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.enableZoom = true;
+            controls.enableRotate = true;
+            controls.enablePan = true;
+            controls.autoRotate = false;
+            controls.autoRotateSpeed = 2.0;
             window.addEventListener('resize', () => {
                 camera.aspect = container.clientWidth / container.clientHeight;
                 camera.updateProjectionMatrix();
@@ -539,6 +546,10 @@
                 }
                 
                 currentObject = object;
+                
+                // Fix upside-down orientation - rotate 180 degrees around X-axis
+                object.rotation.x = Math.PI;
+                
                 scene.add(currentObject);
                 
                 // Auto-fit camera to model
