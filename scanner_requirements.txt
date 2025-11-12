@@ -1,0 +1,12 @@
+# Dependencies for scanner.py on Raspberry Pi 5
+# Install with: pip install -r scanner_requirements.txt
+
+# Picamera2 library for Raspberry Pi Camera Module 3
+picamera2
+
+# NumPy (often required by picamera2)
+numpy
+
+# Note: ffmpeg must be installed separately via apt:
+# sudo apt-get update
+# sudo apt-get install -y ffmpeg
