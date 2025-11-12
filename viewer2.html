@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Item Menu Browser</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; border-radius: 4px; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .header { background: #2a2a2a; padding: 8px; border-bottom: 1px solid #444; border-radius: 4px 4px 0 0; }
+        .header h1 { color: #fff; font-size: 14px; margin-bottom: 6px; font-weight: 300; }
+        .status-indicator { width: 6px; height: 6px; border-radius: 50%; background: #0f0; }
+        .status-indicator.offline { background: #f00; }
+        .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        button { padding: 6px 12px; background: #333; color: #fff; border: 1px solid #555; font-size: 12px; cursor: pointer; font-weight: 300; border-radius: 3px; }
+        button:hover { background: #555; color: #fff; border-color: #777; }
+        button:disabled { background: #2a2a2a; color: #999; border-color: #444; cursor: not-allowed; }
+        .main-container { flex: 1; display: flex; margin: 8px; gap: 8px; min-height: 0; }
+        .sidebar { width: 350px; background: #2a2a2a; display: flex; flex-direction: column; border-radius: 0 4px 4px 0; }
+        .sidebar-header { background: #2a2a2a; color: #fff; padding: 12px; font-weight: 300; display: flex; justify-content: space-between; align-items: center; font-size: 14px; border-bottom: 1px solid #444; }
+        .file-count { background: #333; color: #fff; padding: 2px 6px; font-size: 11px; }
+        .file-list { flex: 1; overflow-y: auto; padding: 4px; }
+        .file-item { display: flex; align-items: center; gap: 8px; padding: 8px; margin-bottom: 2px; background: #2a2a2a; border: 1px solid #444; cursor: pointer; border-radius: 3px; }
+        .file-item:hover { background: #333; border-color: #666; }
+        .file-item.selected { background: #3a3a3a; border-color: #777; }
+        .item-preview { width: 32px; height: 32px; background: #333; border: 1px solid #444; font-size: 14px; display: flex; align-items: center; justify-content: center; color: #aaa; border-radius: 3px; }
+        .item-details { flex: 1; }
+        .item-name { font-weight: 300; color: #fff; margin-bottom: 2px; font-size: 13px; }
+        .item-price { font-weight: 300; color: #fff; font-size: 12px; margin-bottom: 2px; }
+        .item-info { font-size: 10px; color: #999; }
+        .item-actions { display: flex; flex-direction: column; gap: 2px; }
+        .action-btn { width: 24px; height: 24px; border: 1px solid #555; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; padding: 0; background: #333; color: #fff; border-radius: 3px; }
+        .action-btn:hover { background: #555; color: #fff; }
+        .viewer-container { flex: 1; position: relative; background: #2a2a2a; border: 1px solid #444; overflow: hidden; border-radius: 4px; }
+        #viewer { width: 100%; height: 100%; border-radius: 4px; }
+        .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: #2a2a2a; border: 1px solid #444; padding: 12px; z-index: 101; border-radius: 4px; }
+        .spinner { border: 1px solid #444; border-top: 1px solid #fff; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .empty-state { text-align: center; padding: 12px; color: #aaa; }
+        .error { color: #fff; padding: 6px; background: #444; border: 1px solid #666; margin-top: 6px; font-size: 12px; border-radius: 3px; }
+        .upload-section { padding: 8px; border-bottom: 1px solid #444; }
+        input[type="file"] { display: none; }
+        .upload-btn { width: 100%; background: #333; color: #fff; border: 1px solid #555; font-size: 12px; padding: 8px; border-radius: 3px; } .upload-btn:hover { background: #555; color: #fff; }
+        .storage-info { padding: 8px; background: #2a2a2a; border-top: 1px solid #444; font-size: 10px; color: #aaa; }
+        .progress-bar { height: 2px; background: #444; margin-top: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #fff; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: #2a2a2a; border: 1px solid #444; padding: 16px; width: 90%; max-width: 400px; border-radius: 4px; }
+        .modal-content h3 { color: #fff; margin-bottom: 12px; font-size: 16px; text-align: center; font-weight: 300; }
+        .modal-buttons { display: flex; gap: 6px; justify-content: flex-end; margin-top: 16px; }
+        .form-group { margin-bottom: 10px; text-align: left; }
+        .form-group label { display: block; margin-bottom: 3px; font-weight: 300; color: #fff; font-size: 12px; }
+        .form-group input { width: 100%; padding: 6px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px; border-radius: 3px; }
+        .form-group input:focus { outline: none; border-color: #777; }
+        .btn-cancel { background: #444; color: #fff; border: 1px solid #666; } .btn-cancel:hover { background: #666; }
+        .btn-save { background: #333; color: #fff; border: 1px solid #555; } .btn-save:hover { background: #555; }
+        .btn-delete { background: #2a2a2a; color: #fff; border: 1px solid #f00; } .btn-delete:hover { background: #f00; color: #fff; }
+        .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .cart-btn { background: #333; color: #fff; border: 1px solid #9b59b6; } .cart-btn:hover { background: #9b59b6; color: #fff; }
+        .order-item { background: #333; padding: 8px; margin-bottom: 4px; border-left: 2px solid #777; border-radius: 3px; }
+        .order-header { font-weight: 300; margin-bottom: 6px; color: #fff; font-size: 12px; }
+        .order-items { margin-bottom: 6px; font-size: 11px; color: #ddd; }
+        .order-total { font-weight: 400; color: #fff; font-size: 12px; }
+        .remove-order-btn { background: #333; color: #fff; border: 1px solid #f00; padding: 2px 6px; cursor: pointer; font-size: 10px; border-radius: 3px; } .remove-order-btn:hover { background: #f00; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            <span class="status-indicator" id="statusIndicator"></span>
+            Menu Browser
+        </h1>
+        <div class="controls">
+            <button onclick="refreshMenuList()">Refresh</button>
+            <button id="modeToggleBtn" onclick="toggleMode()">Menu</button>
+            <button onclick="showCartModal()">Cart (<span id="cartCount">0</span>)</button>
+            <button onclick="showOrdersModal()">Orders</button>
+            <span id="connectionStatus" style="margin-left: 6px; color: #999; font-size: 11px;"></span>
+        </div>
+        <div id="errorMsg"></div>
+    </div>
+    
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <span>Items</span>
+                <span class="file-count" id="fileCount">0</span>
+            </div>
+            <div class="upload-section">
+                <input type="file" id="fileInput" accept=".ply" onchange="uploadFile()">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()" ${!isManagerMode ? 'disabled' : ''}>
+                    Add Item
+                </button>
+            </div>
+            <div class="file-list" id="fileList">
+                <div class="empty-state">Loading menu...</div>
+            </div>
+            <div class="storage-info" id="storageInfo">Checking storage...</div>
+        </div>
+        
+        <div class="viewer-container">
+            <div id="viewer"></div>
+            <div class="loading" id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <div id="loadingMessage">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" id="deleteModal">
+        <div class="modal-content">
+            <h3>Delete Item</h3>
+            <p style="color: #999999; margin-bottom: 16px;">Delete <strong id="deleteFileName"></strong>?</p>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn-delete" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Item Modal -->
+    <div class="modal" id="editModal">
+        <div class="modal-content">
+            <h3>Edit Item</h3>
+            <div class="form-group">
+                <label for="editItemName">Name</label>
+                <input type="text" id="editItemName" placeholder="Item name">
+            </div>
+            <div class="form-group">
+                <label for="editItemPrice">Price ($)</label>
+                <input type="number" id="editItemPrice" placeholder="0.00" step="0.01">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+                <button class="btn-save" onclick="saveItemChanges()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cart Modal -->
+    <div class="modal" id="cartModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <h3>Cart</h3>
+            <div id="cartItems" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;">
+                <div class="empty-state">Cart empty</div>
+            </div>
+            <div class="form-group">
+                <label for="tableNumber">Table</label>
+                <input type="text" id="tableNumber" placeholder="Table number">
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <strong style="font-size: 14px; color: #fff; font-weight: 400;">Total: $<span id="cartTotal">0.00</span></strong>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeCartModal()">Close</button>
+                <button class="btn-save" onclick="submitOrder()">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orders Modal -->
+    <div class="modal" id="ordersModal">
+        <div class="modal-content" style="max-width: 700px;">
+            <h3>Orders</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="color: #999999; font-size: 12px;">Click refresh to get latest data</span>
+                <div style="display: flex; gap: 6px;">
+                    <button onclick="debugOrders()" style="font-size: 11px; padding: 6px 12px;">Debug</button>
+                    <button onclick="refreshOrders()" style="font-size: 11px; padding: 6px 12px;">Refresh</button>
+                </div>
+            </div>
+            <div id="ordersList" style="max-height: 400px; overflow-y: auto;">
+                <div class="empty-state">Loading orders...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeOrdersModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manager Password Modal -->
+    <div class="modal" id="passwordModal">
+        <div class="modal-content">
+            <h3>Manager Mode</h3>
+            <p style="margin-bottom: 20px; color: #666;">Enter password to enable manager features:</p>
+            <div class="form-group">
+                <label for="passwordInput">Password</label>
+                <input type="password" id="passwordInput" placeholder="Enter password" onkeypress="if(event.key==='Enter') validatePassword()">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closePasswordModal()">Cancel</button>
+                <button class="btn-save" onclick="validatePassword()">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let scene, camera, renderer, controls, currentObject;
+        let selectedBaseName = null, fileToDelete = null, itemToEdit = null;
+        let isManagerMode = false;
+        const MANAGER_PASSWORD = '123';
+        let cart = [];
+        let orders = [];
+
+        // Orders management functions
+        async function loadOrdersFromServer() {
+            try {
+                const response = await fetch(`${API_URL}/api/orders`);
+                const result = await response.json();
+                if (result.success) {
+                    orders = result.orders;
+                    console.log(`Loaded ${orders.length} orders from server`);
+                } else {
+                    console.error('Failed to load orders:', result.error);
+                    orders = [];
+                }
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                orders = [];
+            }
+        }
+
+        async function saveOrderToServer(order) {
+            try {
+                const response = await fetch(`${API_URL}/api/orders`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(order)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log('Order saved to server successfully');
+                    return true;
+                } else {
+                    console.error('Failed to save order:', result.error);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error saving order:', error);
+                return false;
+            }
+        }
+
+        async function deleteOrderFromServer(orderId) {
+            try {
+                const response = await fetch(`${API_URL}/api/orders/${orderId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log('Order deleted from server successfully');
+                    return true;
+                } else {
+                    console.error('Failed to delete order:', result.error);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error deleting order:', error);
+                return false;
+            }
+        }
+
+        function toggleMode() {
+            if (isManagerMode) {
+                // Switch to menu mode
+                isManagerMode = false;
+                updateModeUI();
+            } else {
+                // Try to switch to manager mode - show password modal
+                showPasswordModal();
+            }
+        }
+
+        function showPasswordModal() {
+            document.getElementById('passwordInput').value = '';
+            document.getElementById('passwordModal').classList.add('show');
+            document.getElementById('passwordInput').focus();
+        }
+
+        function closePasswordModal() {
+            document.getElementById('passwordModal').classList.remove('show');
+        }
+
+        function validatePassword() {
+            const password = document.getElementById('passwordInput').value;
+            if (password === MANAGER_PASSWORD) {
+                isManagerMode = true;
+                updateModeUI();
+                closePasswordModal();
+                showError('✅ Manager mode enabled!', false);
+            } else {
+                alert('Incorrect password. Access denied.');
+                document.getElementById('passwordInput').value = '';
+                document.getElementById('passwordInput').focus();
+            }
+        }
+
+        function updateModeUI() {
+            const modeBtn = document.getElementById('modeToggleBtn');
+            const uploadBtn = document.querySelector('.upload-btn');
+            const fileInput = document.getElementById('fileInput');
+            
+            if (isManagerMode) {
+                modeBtn.innerHTML = 'Manager Mode';
+                modeBtn.style.background = '#e74c3c';
+                uploadBtn.disabled = false;
+                fileInput.disabled = false;
+            } else {
+                modeBtn.innerHTML = 'Menu Mode';
+                modeBtn.style.background = '#f39c12';
+                uploadBtn.disabled = true;
+                fileInput.disabled = true;
+            }
+            
+            // Refresh the menu list to show/hide edit buttons and update orders UI
+            loadMenuList();
+            updateOrdersUI();
+        }
+
+        function initScene() {
+            const container = document.getElementById('viewer');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x2a2a2a);
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 5);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const light = new THREE.DirectionalLight(0xffffff, 0.8);
+            light.position.set(10, 10, 10);
+            scene.add(light);
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+            animate();
+        }
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        async function checkConnection() {
+            try {
+                const response = await fetch(`${API_URL}/`);
+                const connected = response.ok;
+                document.getElementById('statusIndicator').classList.toggle('offline', !connected);
+                document.getElementById('connectionStatus').textContent = connected ? 'Connected' : 'Server Offline';
+                document.getElementById('connectionStatus').style.color = connected ? '#4caf50' : '#f44336';
+                return connected;
+            } catch (error) {
+                document.getElementById('statusIndicator').classList.add('offline');
+                document.getElementById('connectionStatus').textContent = 'Server Offline';
+                return false;
+            }
+        }
+        
+        async function loadMenuList() {
+            try {
+                // Use the new endpoint
+                const response = await fetch(`${API_URL}/api/list-items`);
+                const data = await response.json();
+                if (data.success) {
+                    displayMenuList(data.items);
+                    document.getElementById('fileCount').textContent = `${data.count} item${data.count !== 1 ? 's' : ''}`;
+                } else {
+                    showError('Failed to load menu: ' + data.error);
+                }
+            } catch (error) {
+                showError('Cannot connect to API server.');
+                checkConnection();
+            }
+        }
+        
+        function displayMenuList(items) {
+            const fileList = document.getElementById('fileList');
+            if (!items || items.length === 0) {
+                fileList.innerHTML = `<div class="empty-state">No items found. Upload a .PLY file to create one.</div>`;
+                return;
+            }
+            fileList.innerHTML = items.map(item => {
+                const price = typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : 'N/A';
+                // Escape quotes for onclick handlers
+                const safeDisplayName = item.display_name.replace(/'/g, "\\'");
+                const safeBaseName = item.base_name.replace(/'/g, "\\'");
+
+                return `
+                    <div class="file-item" id="item-${safeBaseName}" onclick="loadPLYFile('${safeBaseName}', this)">
+                        <div class="item-preview">□</div>
+                        <div class="item-details">
+                            <div class="item-name">${item.display_name}</div>
+                            <div class="item-price">${price}</div>
+                            <div class="item-info">
+                                ${item.vertex_count.toLocaleString()} verts &bull; ${item.file_size_mb.toFixed(2)} MB
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            ${!isManagerMode ? `
+                                <button class="action-btn cart-btn" title="Add to Cart" onclick="event.stopPropagation(); addToCart('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
+                            ` : ''}
+                            ${isManagerMode ? `
+                                <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price})">✏️</button>
+                                <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">×</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadPLYFile(baseName, element) {
+            // Lazy loading: Check if model is already loaded
+            if (selectedBaseName === baseName && currentObject) {
+                // Model already loaded, just select it
+                document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
+                element.classList.add('selected');
+                return;
+            }
+
+            showLoading(true, 'Loading 3D Model...');
+            if (currentObject) scene.remove(currentObject);
+
+            selectedBaseName = baseName;
+            document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
+            element.classList.add('selected');
+
+            // Create AbortController for cancellation
+            const abortController = new AbortController();
+            
+            try {
+                const loader = new THREE.PLYLoader();
+                
+                // Load with timeout and cancellation support
+                const geometry = await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Loading timeout'));
+                    }, 30000); // 30 second timeout
+                    
+                    loader.load(`${API_URL}/api/download-ply/${baseName}`,
+                        (loadedGeometry) => {
+                            clearTimeout(timeout);
+                            resolve(loadedGeometry);
+                        },
+                        (xhr) => {
+                            const progress = Math.round(xhr.loaded / xhr.total * 100);
+                            showLoading(true, `Loading: ${progress}%`);
+                        },
+                        (error) => {
+                            clearTimeout(timeout);
+                            reject(error);
+                        }
+                    );
+                });
+
+                // Process geometry
+                geometry.computeBoundingBox();
+                geometry.center();
+                const hasColors = geometry.hasAttribute('color');
+                let material, object;
+                
+                if (geometry.index === null) { // Point cloud
+                     material = new THREE.PointsMaterial({ vertexColors: hasColors, size: 0.005 });
+                     if (!hasColors) material.color.setHex(0x38f9d7);
+                     object = new THREE.Points(geometry, material);
+                } else { // Mesh
+                    geometry.computeVertexNormals();
+                    material = new THREE.MeshStandardMaterial({ vertexColors: hasColors, side: THREE.DoubleSide });
+                    if (!hasColors) material.color.setHex(0xdddddd);
+                    object = new THREE.Mesh(geometry, material);
+                }
+                
+                currentObject = object;
+                scene.add(currentObject);
+                
+                // Auto-fit camera to model
+                const size = new THREE.Box3().setFromObject(currentObject).getSize(new THREE.Vector3()).length();
+                controls.reset();
+                camera.position.z = size * 1.5;
+                
+                showLoading(false);
+                
+            } catch (error) {
+                console.error('Failed to load PLY model:', error);
+                showError('Failed to load 3D model. Please try again.');
+                showLoading(false);
+                
+                // Reset selection on error
+                selectedBaseName = null;
+                element.classList.remove('selected');
+            }
+        }
+
+        async function uploadFile() {
+            if (!isManagerMode) {
+                alert('Uploading requires manager mode. Please switch to manager mode first.');
+                return;
+            }
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+            showLoading(true, `Uploading ${file.name}...`);
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const response = await fetch(`${API_URL}/api/upload-ply`, { method: 'POST', body: formData });
+                const result = await response.json();
+                if (result.success) {
+                    showError('✅ Item added successfully!', false);
+                    debounceRefresh();
+                } else {
+                    showError('Upload failed: ' + result.error);
+                }
+            } catch (error) {
+                showError('Upload error: ' + error.message);
+            } finally {
+                showLoading(false);
+                document.getElementById('fileInput').value = '';
+            }
+        }
+        
+        function showDeleteModal(baseName, displayName) {
+            if (!isManagerMode) {
+                alert('Deleting requires manager mode. Please switch to manager mode first.');
+                return;
+            }
+            fileToDelete = baseName;
+            document.getElementById('deleteFileName').textContent = `'${displayName}'`;
+            document.getElementById('deleteModal').classList.add('show');
+        }
+        function closeDeleteModal() { document.getElementById('deleteModal').classList.remove('show'); fileToDelete = null; }
+        async function confirmDelete() {
+            if (!fileToDelete) return;
+            closeDeleteModal();
+            showLoading(true, 'Deleting item...');
+            try {
+                const response = await fetch(`${API_URL}/api/delete-ply/${fileToDelete}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    if (selectedBaseName === fileToDelete && currentObject) scene.remove(currentObject);
+                    debounceRefresh();
+                    showError('✅ Item deleted successfully!', false);
+                } else { showError('Delete failed: ' + data.error); }
+            } catch (error) { showError('Delete error: ' + error.message); }
+            finally { showLoading(false); }
+        }
+
+        function showEditModal(baseName, currentName, currentPrice) {
+            if (!isManagerMode) {
+                alert('Editing requires manager mode. Please switch to manager mode first.');
+                return;
+            }
+            itemToEdit = baseName;
+            document.getElementById('editItemName').value = currentName;
+            document.getElementById('editItemPrice').value = currentPrice.toFixed(2);
+            document.getElementById('editModal').classList.add('show');
+        }
+        function closeEditModal() { document.getElementById('editModal').classList.remove('show'); itemToEdit = null; }
+        
+        // --- START OF FIX ---
+        async function saveItemChanges() {
+            if (!itemToEdit) return;
+
+            // Capture the item's name before the modal is closed or state is changed.
+            const itemBaseNameToUpdate = itemToEdit; 
+
+            const newName = document.getElementById('editItemName').value.trim();
+            const newPrice = parseFloat(document.getElementById('editItemPrice').value);
+            
+            if (!newName || isNaN(newPrice) || newPrice < 0) {
+                alert('Please enter a valid name and a non-negative price.');
+                return;
+            }
+
+            closeEditModal(); // It's now safe to close the modal and nullify itemToEdit
+            showLoading(true, 'Saving changes...');
+            
+            try {
+                // Use the captured local variable for the API call.
+                const response = await fetch(`${API_URL}/api/update-item/${itemBaseNameToUpdate}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName, price: newPrice })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showError('✅ Item updated successfully!', false);
+                    debounceRefresh();
+                } else { 
+                    showError('Failed to save: ' + data.error); 
+                }
+            } catch (e) { 
+                showError('Error saving changes: ' + e.message); 
+            }
+            finally { 
+                showLoading(false); 
+            }
+        }
+        // --- END OF FIX ---
+
+        // Performance optimizations
+        let refreshTimeout = null;
+        
+        function debounceRefresh() {
+            if (refreshTimeout) clearTimeout(refreshTimeout);
+            refreshTimeout = setTimeout(() => {
+                refreshMenuList();
+            }, 500);
+        }
+        
+        function refreshMenuList() { 
+            loadMenuList(); 
+            loadStorageInfo(); 
+        }
+        async function loadStorageInfo() { /* Unchanged */ } // This can remain as-is
+
+        function showLoading(show, msg = 'Loading...') {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('loadingMessage').textContent = msg;
+        }
+        function showError(msg, isError = true) {
+            const div = document.getElementById('errorMsg');
+            const style = isError ? '' : 'background: #e8f5e9; color: #2e7d32;';
+            div.innerHTML = `<div class="error" style="${style}">${msg}</div>`;
+            if (!isError) setTimeout(() => { if (div.firstChild && div.firstChild.textContent === msg) div.innerHTML = ''; }, 5000);
+        }
+
+        // Cart Functions
+        function addToCart(baseName, displayName, price) {
+            const existingItem = cart.find(item => item.baseName === baseName);
+            if (existingItem) {
+                existingItem.quantity++;
+            } else {
+                cart.push({ baseName, displayName, price, quantity: 1 });
+            }
+            updateCartUI();
+            showError(`✅ ${displayName} added to cart!`, false);
+        }
+
+        function removeFromCart(baseName) {
+            cart = cart.filter(item => item.baseName !== baseName);
+            updateCartUI();
+        }
+
+        function updateCartQuantity(baseName, change) {
+            const item = cart.find(item => item.baseName === baseName);
+            if (item) {
+                item.quantity += change;
+                if (item.quantity <= 0) {
+                    removeFromCart(baseName);
+                } else {
+                    updateCartUI();
+                }
+            }
+        }
+
+        function updateCartUI() {
+            const cartCount = document.getElementById('cartCount');
+            const cartItems = document.getElementById('cartItems');
+            const cartTotal = document.getElementById('cartTotal');
+            
+            const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+            cartCount.textContent = totalItems;
+            
+            if (cart.length === 0) {
+                cartItems.innerHTML = '<div class="empty-state">Your cart is empty</div>';
+                cartTotal.textContent = '0.00';
+            } else {
+                cartItems.innerHTML = cart.map(item => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #333; margin-bottom: 8px; border-radius: 3px; border: 1px solid #555;">
+                        <div>
+                            <div style="font-weight: 400; color: #fff;">${item.displayName}</div>
+                            <div style="color: #aaa; font-size: 12px;">$${item.price.toFixed(2)} each</div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button onclick="updateCartQuantity('${item.baseName}', -1)" style="width: 24px; height: 24px; border: 1px solid #555; background: #444; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">-</button>
+                            <span style="font-weight: 400; color: #fff; min-width: 20px; text-align: center;">${item.quantity}</span>
+                            <button onclick="updateCartQuantity('${item.baseName}', 1)" style="width: 24px; height: 24px; border: 1px solid #555; background: #444; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">+</button>
+                            <button onclick="removeFromCart('${item.baseName}')" style="width: 24px; height: 24px; border: 1px solid #555; background: #444; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1;">×</button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                cartTotal.textContent = total.toFixed(2);
+            }
+        }
+
+        function showCartModal() {
+            document.getElementById('cartModal').classList.add('show');
+            updateCartUI();
+        }
+
+        function closeCartModal() {
+            document.getElementById('cartModal').classList.remove('show');
+        }
+
+        async function submitOrder() {
+            const tableNumber = document.getElementById('tableNumber').value.trim();
+            if (!tableNumber) {
+                alert('Please enter your table number.');
+                return;
+            }
+            if (cart.length === 0) {
+                alert('Your cart is empty.');
+                return;
+            }
+
+            const order = {
+                id: Date.now(),
+                tableNumber: tableNumber,
+                items: [...cart],
+                total: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+                timestamp: new Date().toLocaleString()
+            };
+
+            // Save order to server
+            const saved = await saveOrderToServer(order);
+            if (saved) {
+                // Add to local array for immediate UI update
+                orders.push(order);
+                cart = [];
+                updateCartUI();
+                closeCartModal();
+                document.getElementById('tableNumber').value = '';
+                showError(`✅ Order submitted for Table ${tableNumber}!`, false);
+                
+                // Refresh orders list to show the new order
+                await loadOrdersFromServer();
+                updateOrdersUI();
+            } else {
+                alert('Failed to save order. Please try again.');
+            }
+        }
+
+        // Orders Functions
+        async function showOrdersModal() {
+            document.getElementById('ordersModal').classList.add('show');
+            // Load latest orders from server
+            await loadOrdersFromServer();
+            updateOrdersUI();
+        }
+
+        function closeOrdersModal() {
+            document.getElementById('ordersModal').classList.remove('show');
+        }
+
+        async function refreshOrders() {
+            // Show loading state
+            const ordersList = document.getElementById('ordersList');
+            ordersList.innerHTML = '<div class="empty-state">Refreshing orders from Google Drive...</div>';
+            
+            // Force reload orders from server
+            await loadOrdersFromServer();
+            updateOrdersUI();
+            showError('✅ Orders refreshed from Google Drive!', false);
+        }
+
+        async function debugOrders() {
+            try {
+                const response = await fetch(`${API_URL}/api/debug/orders`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Create a detailed debug view
+                    let debugContent = `
+                        <div style="background: #333; padding: 15px; border-radius: 4px; margin-bottom: 15px; font-family: monospace; font-size: 12px; color: #fff;">
+                            <h4>🔍 Debug Information</h4>
+                            <p><strong>File Found:</strong> ${result.found_file ? 'Yes' : 'No'}</p>
+                    `;
+                    
+                    if (result.found_file) {
+                        debugContent += `
+                            <p><strong>File ID:</strong> ${result.file_info.id}</p>
+                            <p><strong>Modified:</strong> ${new Date(result.file_info.modifiedTime).toLocaleString()}</p>
+                            <p><strong>Size:</strong> ${result.file_info.size_bytes} bytes</p>
+                            <p><strong>Content Length:</strong> ${result.content_length} characters</p>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #3498db;">Raw Content (click to expand)</summary>
+                                <pre style="background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${result.raw_content}</pre>
+                            </details>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #3498db;">Parsed Content (click to expand)</summary>
+                                <pre style="background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(result.parsed_content, null, 2)}</pre>
+                            </details>
+                        `;
+                    } else {
+                        debugContent += `<p><strong>Message:</strong> ${result.message}</p>`;
+                    }
+                    
+                    debugContent += '</div>';
+                    
+                    // Show debug modal
+                    const debugModal = document.createElement('div');
+                    debugModal.className = 'modal show';
+                    debugModal.style.zIndex = '2000';
+                    debugModal.innerHTML = `
+                        <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                            <h3>🔍 Orders Debug Information</h3>
+                            ${debugContent}
+                            <div class="modal-buttons">
+                                <button class="btn-cancel" onclick="this.closest('.modal').remove()">Close</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(debugModal);
+                    
+                } else {
+                    alert('Debug failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Debug error: ' + error.message);
+            }
+        }
+
+        async function removeOrder(orderId) {
+            if (!isManagerMode) {
+                alert('Removing orders requires manager mode.');
+                return;
+            }
+            
+            // Delete from server
+            const deleted = await deleteOrderFromServer(orderId);
+            if (deleted) {
+                // Remove from local array for immediate UI update
+                orders = orders.filter(order => order.id !== orderId);
+                updateOrdersUI();
+                showError('✅ Order removed!', false);
+            } else {
+                alert('Failed to remove order. Please try again.');
+            }
+        }
+
+        function updateOrdersUI() {
+            const ordersList = document.getElementById('ordersList');
+            
+            if (orders.length === 0) {
+                ordersList.innerHTML = '<div class="empty-state">No orders found</div>';
+            } else {
+                ordersList.innerHTML = orders.map(order => `
+                    <div class="order-item">
+                        <div class="order-header">
+                            Order #${order.id} - Table ${order.tableNumber} - ${order.timestamp}
+                            ${isManagerMode ? `<button class="remove-order-btn" onclick="removeOrder(${order.id})">Remove</button>` : ''}
+                        </div>
+                        <div class="order-items">
+                            ${order.items.map(item => `
+                                <div>${item.quantity}x ${item.displayName} - $${(item.price * item.quantity).toFixed(2)}</div>
+                            `).join('')}
+                        </div>
+                        <div class="order-total">Total: $${order.total.toFixed(2)}</div>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // --- Initialization ---
+        initScene();
+        checkConnection().then(async conn => { 
+            if (conn) {
+                refreshMenuList();
+                // Load orders from server
+                await loadOrdersFromServer();
+                // Initialize UI in menu mode
+                updateModeUI();
+            }
+        });
+        setInterval(checkConnection, 30000);
+        
+        // Auto-refresh orders every 10 seconds for all users
+        setInterval(async () => {
+            if (document.getElementById('ordersModal').classList.contains('show')) {
+                // Only refresh if orders modal is open to avoid unnecessary API calls
+                await loadOrdersFromServer();
+                updateOrdersUI();
+            }
+        }, 10000);
+    </script>
+</body>
+</html>
