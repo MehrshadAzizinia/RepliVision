@@ -2,6 +2,9 @@
 flask==3.0.0
 flask-cors==4.0.0
 
+# Production WSGI server (required for Render/Heroku deployment)
+gunicorn==21.2.0
+
 # Google Drive API
 google-auth==2.25.2
 google-auth-oauthlib==1.2.0
@@ -10,4 +13,6 @@ google-api-python-client==2.111.0
 
 # Data processing
 numpy==1.26.2
-requests
+requests==2.31.0
+
+# Note: viewer2.html uses Three.js loaded from CDN (no Python dependencies needed)
