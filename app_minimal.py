@@ -268,6 +268,11 @@ class SimpleGoogleDriveStorage:
                 file_name = file['name']
                 name = file_name.replace('.ply', '')
                 
+                # Skip files with invalid names
+                if not name or name.strip() == '' or name in ['null', 'undefined']:
+                    logger.warning(f"Skipping file with invalid name: {file_name}")
+                    continue
+                
                 # Get item metadata or use defaults
                 item_meta = self.items_metadata.get(name, {'name': f"Item: {name}", 'price': 0.00, 'category': 'Uncategorized', 'description': '', 'available': True})
                 
@@ -295,6 +300,7 @@ class SimpleGoogleDriveStorage:
             logger.error(f"Error listing files: {error}")
             return []
     
+    # --- START OF REFACTOR ---
     def store_ply_file(self, name, file_path, metadata=None):
         try:
             with open(file_path, 'rb') as f:
@@ -311,16 +317,8 @@ class SimpleGoogleDriveStorage:
                     fields='id'
                 ).execute()
                 
-                # Update metadata
-                self.metadata[name] = {
-                    'file_id': file['id'],
-                    'type': 'ply',
-                    'created_at': datetime.now().isoformat(),
-                    'custom_metadata': metadata or {}
-                }
-                self._save_metadata()
-                
-                # Add to items metadata if not exists
+                # This is the only metadata that matters for item properties.
+                # We no longer add the PLY file to the fragile metadata_index.json.
                 if name not in self.items_metadata:
                     self.items_metadata[name] = {
                         'name': f"New Item: {name}",
@@ -338,16 +336,39 @@ class SimpleGoogleDriveStorage:
             raise
     
     def delete_ply_file(self, name):
-        if name in self.metadata:
-            file_id = self.metadata[name]['file_id']
-            self.service.files().delete(fileId=file_id).execute()
-            del self.metadata[name]
-            self._save_metadata()
+        try:
+            # Step 1: Find the .ply file directly in Google Drive to get its ID.
+            query = f"name='{name}.ply' and '{self.folder_id}' in parents and trashed=false"
+            results = self.service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+            files = results.get('files', [])
             
-            # Remove from items metadata
+            if not files:
+                # File doesn't exist on Drive, but the metadata entry might. Clean it up.
+                if name in self.items_metadata:
+                    del self.items_metadata[name]
+                    self._save_items_metadata()
+                    logger.info(f"Removed orphaned metadata entry for '{name}'.")
+                raise FileNotFoundError(f"PLY file '{name}.ply' not found in Google Drive.")
+            
+            # If found, delete the actual file from Drive.
+            file_to_delete = files[0]
+            file_id = file_to_delete['id']
+            self.service.files().delete(fileId=file_id).execute()
+            logger.info(f"Successfully deleted .ply file with ID '{file_id}' from Google Drive.")
+
+            # Step 2: Delete the corresponding metadata from items.txt.
             if name in self.items_metadata:
                 del self.items_metadata[name]
                 self._save_items_metadata()
+                logger.info(f"Successfully removed metadata for '{name}' from items.txt.")
+
+        except HttpError as error:
+            logger.error(f"An API error occurred during file deletion: {error}")
+            raise # Re-raise the exception to be handled by the Flask route.
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in delete_ply_file: {e}")
+            raise
+    # --- END OF REFACTOR ---
     
     def get_storage_info(self):
         try:
@@ -391,13 +412,22 @@ def list_items():
         logger.error(f"Error in list_items: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# --- START OF REFACTOR ---
 @app.route('/api/download-ply/<name>', methods=['GET'])
 def download_ply(name):
     try:
-        if name not in storage.metadata:
-            return jsonify({'success': False, 'error': f"PLY file '{name}' not found"}), 404
+        if not name or name in ['null', 'undefined', '']:
+            return jsonify({'success': False, 'error': 'Invalid item name provided for download.'}), 400
+
+        # Query Drive to get the file_id directly, making it more robust.
+        query = f"name='{name}.ply' and '{storage.folder_id}' in parents and trashed=false"
+        results = storage.service.files().list(q=query, spaces='drive', fields='files(id)').execute()
+        files = results.get('files', [])
+
+        if not files:
+            return jsonify({'success': False, 'error': f"PLY file '{name}.ply' not found in storage."}), 404
         
-        file_id = storage.metadata[name]['file_id']
+        file_id = files[0]['id']
         request_obj = storage.service.files().get_media(fileId=file_id)
         
         buffer = BytesIO()
@@ -427,7 +457,8 @@ def upload_ply():
             return jsonify({'success': False, 'error': 'No file provided'}), 400
         
         file = request.files['file']
-        name = request.form.get('name', file.filename.replace('.ply', ''))
+        # Sanitize the name to be used as a base_name (key)
+        name = os.path.splitext(file.filename)[0]
         
         if not file.filename.endswith('.ply'):
             return jsonify({'success': False, 'error': 'File must be a PLY file'}), 400
@@ -435,7 +466,8 @@ def upload_ply():
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix='.ply') as tmp:
             file.save(tmp.name)
-            storage.store_ply_file(name=name, file_path=tmp.name, metadata={'uploaded_via': 'web_api'})
+            # Use the refactored, simpler store method
+            storage.store_ply_file(name=name, file_path=tmp.name)
             os.unlink(tmp.name)
         
         return jsonify({
@@ -451,15 +483,24 @@ def upload_ply():
 @app.route('/api/delete-ply/<name>', methods=['DELETE'])
 def delete_ply(name):
     try:
-        if name not in storage.metadata:
-            return jsonify({'success': False, 'error': f"PLY file '{name}' not found"}), 404
+        logger.info(f"Delete request received for item base_name: '{name}'")
         
+        if not name or name in ['null', 'undefined', '']:
+            return jsonify({'success': False, 'error': 'Invalid item name provided for deletion.'}), 400
+        
+        # Delegate all logic to the new robust storage method
         storage.delete_ply_file(name)
-        return jsonify({'success': True, 'message': f"Successfully deleted item {name}."})
+        return jsonify({'success': True, 'message': f"Successfully deleted item '{name}' and its metadata."})
+
+    except FileNotFoundError as e:
+        logger.warning(f"File not found during deletion attempt: {e}")
+        # The user's goal is for the item to be gone. From their perspective, this is a success.
+        return jsonify({'success': True, 'message': f"Item '{name}' was already deleted or did not exist."})
     
     except Exception as e:
-        logger.error(f"Error in delete_ply: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"An error occurred in the delete_ply endpoint: {e}")
+        return jsonify({'success': False, 'error': f"An unexpected server error occurred: {e}"}), 500
+# --- END OF REFACTOR ---
 
 @app.route('/api/update-item/<name>', methods=['POST'])
 def update_item(name):

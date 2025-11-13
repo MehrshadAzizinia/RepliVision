@@ -92,7 +92,7 @@
         .btn-delete { background: #1a1a1a; color: #fff; border: 1px solid #f00; } .btn-delete:hover { background: #f00; color: #fff; }
         .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .cart-btn { background: #222; color: #fff; border: 1px solid #9b59b6; } .cart-btn:hover { background: #9b59b6; color: #fff; }
+        .add-to-order-btn { background: #222; color: #fff; border: 1px solid #9b59b6; } .add-to-order-btn:hover { background: #9b59b6; color: #fff; }
         .order-item { background: #222; padding: 8px; margin-bottom: 4px; border-left: 2px solid #666; border-radius: 3px; }
         .order-header { font-weight: 300; margin-bottom: 6px; color: #fff; font-size: 12px; }
         .order-items { margin-bottom: 6px; font-size: 11px; color: #ccc; }
@@ -109,9 +109,9 @@
         </h1>
         <div class="controls">
             <button onclick="refreshMenuList()">Refresh</button>
-            <button id="modeToggleBtn" onclick="toggleMode()">Menu</button>
-            <button onclick="showCartModal()">Cart (<span id="cartCount">0</span>)</button>
-            <button onclick="showOrdersModal()">Orders</button>
+            <button id="modeToggleBtn" onclick="toggleMode()">Edit</button>
+            <button onclick="showOrderModal()">Your Order (<span id="orderItemCount">0</span>)</button>
+            <button onclick="showOrdersModal()">All Orders</button>
             <span id="connectionStatus" style="margin-left: 6px; color: #999; font-size: 11px;"></span>
         </div>
         <div id="errorMsg"></div>
@@ -189,12 +189,12 @@
         </div>
     </div>
 
-    <!-- Cart Modal -->
-    <div class="modal" id="cartModal">
+    <!-- Current Order Modal -->
+    <div class="modal" id="orderModal">
         <div class="modal-content" style="max-width: 600px;">
-            <h3>Cart</h3>
-            <div id="cartItems" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;">
-                <div class="empty-state">Cart empty</div>
+            <h3>Your Order</h3>
+            <div id="orderItemsList" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;">
+                <div class="empty-state">Your order is empty</div>
             </div>
             <div class="form-group">
                 <label for="tableNumber">Table</label>
@@ -205,19 +205,19 @@
                 <textarea id="orderNotes" placeholder="Enter any special notes or allergies..." style="width: 100%; padding: 6px; border: 1px solid #444; background: #222; color: #fff; font-size: 12px; border-radius: 3px; min-height: 60px; resize: vertical; font-family: inherit;"></textarea>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <strong style="font-size: 14px; color: #fff; font-weight: 400;">Total: $<span id="cartTotal">0.00</span></strong>
+                <strong style="font-size: 14px; color: #fff; font-weight: 400;">Total: $<span id="orderTotal">0.00</span></strong>
             </div>
             <div class="modal-buttons">
-                <button class="btn-cancel" onclick="closeCartModal()">Close</button>
-                <button class="btn-save" onclick="submitOrder()">Submit</button>
+                <button class="btn-cancel" onclick="closeOrderModal()">Close</button>
+                <button class="btn-save" onclick="placeOrder()">Place Order</button>
             </div>
         </div>
     </div>
 
-    <!-- Orders Modal -->
+    <!-- All Orders Modal -->
     <div class="modal" id="ordersModal">
         <div class="modal-content" style="max-width: 700px;">
-            <h3>Orders</h3>
+            <h3>All Placed Orders</h3>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span style="color: #888888; font-size: 12px;">Click refresh to get latest data</span>
                 <div style="display: flex; gap: 6px;">
@@ -260,7 +260,7 @@
         let selectedBaseName = null, fileToDelete = null, itemToEdit = null;
         let isManagerMode = false;
         const MANAGER_PASSWORD = '123';
-        let cart = [];
+        let currentOrder = [];
         let orders = [];
 
         // Orders management functions
@@ -365,13 +365,13 @@
             const uploadSection = document.querySelector('.upload-section');
             
             if (isManagerMode) {
-                modeBtn.innerHTML = 'Manager Mode';
+                modeBtn.innerHTML = 'Stop Editing';
                 modeBtn.style.background = '#e74c3c';
                 uploadBtn.disabled = false;
                 fileInput.disabled = false;
                 if (uploadSection) uploadSection.style.display = 'block';
             } else {
-                modeBtn.innerHTML = 'Menu Mode';
+                modeBtn.innerHTML = 'Edit';
                 modeBtn.style.background = '#f39c12';
                 uploadBtn.disabled = true;
                 fileInput.disabled = true;
@@ -473,6 +473,7 @@
             let html = '';
             sortedCategories.forEach(category => {
                 const categoryItems = itemsByCategory[category];
+                
                 html += `
                     <div class="category-section" style="margin-bottom: 16px;">
                         <div class="category-header" style="background: #333; color: #fff; padding: 8px 12px; font-weight: 400; font-size: 13px; border-radius: 3px; margin-bottom: 4px; border: 1px solid #444;">
@@ -482,10 +483,27 @@
                 `;
                 
                 categoryItems.forEach(item => {
+                    console.log('Processing item:', item); // Debug log
+                    
+                    // Generate base_name if it's missing or invalid
+                    if (!item.base_name || item.base_name === 'null' || item.base_name === 'undefined' || item.base_name.trim() === '') {
+                        // Use display_name as fallback, removing spaces and special chars
+                        const fallbackName = (item.display_name || item.file_id || 'unnamed_item').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+                        item.base_name = fallbackName;
+                        console.warn('Generated fallback base_name:', item.base_name, 'for item:', item); // Debug log
+                    }
+                    
+                    // Additional validation to ensure base_name is never empty
+                    if (!item.base_name || item.base_name.trim() === '') {
+                        console.error('Critical error: base_name is still empty after fallback for item:', item);
+                        item.base_name = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                        console.warn('Emergency fallback base_name:', item.base_name);
+                    }
+                    
                     const price = typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : 'N/A';
                     const isAvailable = item.available !== false; // Default to true if undefined
                     // Escape quotes for onclick handlers
-                    const safeDisplayName = item.display_name.replace(/'/g, "\\'");
+                    const safeDisplayName = (item.display_name || '').replace(/'/g, "\\'");
                     const safeBaseName = item.base_name.replace(/'/g, "\\'");
                     const safeDescription = (item.description || '').replace(/'/g, "\\'");
 
@@ -503,7 +521,7 @@
                             </div>
                             <div class="item-actions">
                                 ${!isManagerMode && isAvailable ? `
-                                    <button class="action-btn cart-btn" title="Add to Cart" onclick="event.stopPropagation(); addToCart('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
+                                    <button class="action-btn add-to-order-btn" title="Add to Order" onclick="event.stopPropagation(); addToOrder('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
                                 ` : ''}
                                 ${isManagerMode ? `
                                     <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price}, '${item.category || 'Uncategorized'}', '${safeDescription}', ${isAvailable})">✏️</button>
@@ -641,26 +659,58 @@
                 alert('Deleting requires manager mode. Please switch to manager mode first.');
                 return;
             }
-            fileToDelete = baseName;
-            document.getElementById('deleteFileName').textContent = `'${displayName}'`;
+            console.log('Attempting to delete:', { baseName, displayName }); // Debug log
+            
+            // Enhanced validation
+            if (!baseName || baseName === 'null' || baseName === 'undefined' || baseName.trim() === '') {
+                console.error('Invalid baseName for deletion:', { baseName, displayName });
+                alert('Invalid item: Cannot delete item with no name. Please refresh the page and try again.');
+                return;
+            }
+            
+            fileToDelete = baseName.trim(); // Ensure no whitespace issues
+            document.getElementById('deleteFileName').textContent = `'${displayName || baseName}'`;
             document.getElementById('deleteModal').classList.add('show');
         }
         function closeDeleteModal() { document.getElementById('deleteModal').classList.remove('show'); fileToDelete = null; }
+        
+        // --- START OF FIX ---
         async function confirmDelete() {
-            if (!fileToDelete) return;
+            if (!fileToDelete) {
+                showError('Cannot delete: Invalid item name.');
+                return;
+            }
+
+            // Capture the value in a local variable before it's cleared.
+            const itemNameToDelete = fileToDelete;
+
+            // Now it's safe to close the modal and clear the global state.
             closeDeleteModal();
             showLoading(true, 'Deleting item...');
+
             try {
-                const response = await fetch(`${API_URL}/api/delete-ply/${fileToDelete}`, { method: 'DELETE' });
+                // Use the captured local variable for the API call.
+                const response = await fetch(`${API_URL}/api/delete-ply/${itemNameToDelete}`, { method: 'DELETE' });
                 const data = await response.json();
                 if (data.success) {
-                    if (selectedBaseName === fileToDelete && currentObject) scene.remove(currentObject);
+                    if (selectedBaseName === itemNameToDelete && currentObject) {
+                        scene.remove(currentObject);
+                        currentObject = null;
+                        selectedBaseName = null;
+                    }
                     debounceRefresh();
                     showError('✅ Item deleted successfully!', false);
-                } else { showError('Delete failed: ' + data.error); }
-            } catch (error) { showError('Delete error: ' + error.message); }
-            finally { showLoading(false); }
+                } else { 
+                    showError('Delete failed: ' + data.error); 
+                }
+            } catch (error) { 
+                showError('Delete error: ' + error.message); 
+            }
+            finally { 
+                showLoading(false); 
+            }
         }
+        // --- END OF FIX ---
 
         function showEditModal(baseName, currentName, currentPrice, currentCategory, currentDescription, currentAvailable) {
             if (!isManagerMode) {
@@ -681,7 +731,7 @@
         async function saveItemChanges() {
             if (!itemToEdit) return;
 
-            // Capture the item's name before the modal is closed or state is changed.
+            // Capture the item's name in a local variable before the modal is closed.
             const itemBaseNameToUpdate = itemToEdit; 
 
             const newName = document.getElementById('editItemName').value.trim();
@@ -695,7 +745,8 @@
                 return;
             }
 
-            closeEditModal(); // It's now safe to close the modal and nullify itemToEdit
+            // Now it's safe to close the modal and clear the global state.
+            closeEditModal(); 
             showLoading(true, 'Saving changes...');
             
             try {
@@ -733,7 +784,8 @@
         
         function refreshMenuList() { 
             loadMenuList(); 
-            loadStorageInfo(); 
+            // This function was empty in the original file, so keeping it that way.
+            // loadStorageInfo(); 
         }
         async function loadStorageInfo() { /* Unchanged */ } // This can remain as-is
 
@@ -748,93 +800,93 @@
             if (!isError) setTimeout(() => { if (div.firstChild && div.firstChild.textContent === msg) div.innerHTML = ''; }, 5000);
         }
 
-        // Cart Functions
-        function addToCart(baseName, displayName, price) {
-            const existingItem = cart.find(item => item.baseName === baseName);
+        // Current Order Functions
+        function addToOrder(baseName, displayName, price) {
+            const existingItem = currentOrder.find(item => item.baseName === baseName);
             if (existingItem) {
                 existingItem.quantity++;
             } else {
-                cart.push({ baseName, displayName, price, quantity: 1 });
+                currentOrder.push({ baseName, displayName, price, quantity: 1 });
             }
-            updateCartUI();
-            showError(`✅ ${displayName} added to cart!`, false);
+            updateCurrentOrderUI();
+            showError(`✅ ${displayName} added to your order!`, false);
         }
 
-        function removeFromCart(baseName) {
-            cart = cart.filter(item => item.baseName !== baseName);
-            updateCartUI();
+        function removeFromOrder(baseName) {
+            currentOrder = currentOrder.filter(item => item.baseName !== baseName);
+            updateCurrentOrderUI();
         }
 
-        function updateCartQuantity(baseName, change) {
-            const item = cart.find(item => item.baseName === baseName);
+        function updateOrderQuantity(baseName, change) {
+            const item = currentOrder.find(item => item.baseName === baseName);
             if (item) {
                 item.quantity += change;
                 if (item.quantity <= 0) {
-                    removeFromCart(baseName);
+                    removeFromOrder(baseName);
                 } else {
-                    updateCartUI();
+                    updateCurrentOrderUI();
                 }
             }
         }
 
-        function updateCartUI() {
-            const cartCount = document.getElementById('cartCount');
-            const cartItems = document.getElementById('cartItems');
-            const cartTotal = document.getElementById('cartTotal');
+        function updateCurrentOrderUI() {
+            const orderItemCount = document.getElementById('orderItemCount');
+            const orderItemsList = document.getElementById('orderItemsList');
+            const orderTotal = document.getElementById('orderTotal');
             
-            const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-            cartCount.textContent = totalItems;
+            const totalItems = currentOrder.reduce((sum, item) => sum + item.quantity, 0);
+            orderItemCount.textContent = totalItems;
             
-            if (cart.length === 0) {
-                cartItems.innerHTML = '<div class="empty-state">Your cart is empty</div>';
-                cartTotal.textContent = '0.00';
+            if (currentOrder.length === 0) {
+                orderItemsList.innerHTML = '<div class="empty-state">Your order is empty</div>';
+                orderTotal.textContent = '0.00';
             } else {
-                cartItems.innerHTML = cart.map(item => `
+                orderItemsList.innerHTML = currentOrder.map(item => `
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #222; margin-bottom: 8px; border-radius: 3px; border: 1px solid #444;">
                         <div>
                             <div style="font-weight: 400; color: #fff;">${item.displayName}</div>
                             <div style="color: #999; font-size: 12px;">$${item.price.toFixed(2)} each</div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <button onclick="updateCartQuantity('${item.baseName}', -1)" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">-</button>
+                            <button onclick="updateOrderQuantity('${item.baseName}', -1)" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">-</button>
                             <span style="font-weight: 400; color: #fff; min-width: 20px; text-align: center;">${item.quantity}</span>
-                            <button onclick="updateCartQuantity('${item.baseName}', 1)" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">+</button>
-                            <button onclick="removeFromCart('${item.baseName}')" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1;">×</button>
+                            <button onclick="updateOrderQuantity('${item.baseName}', 1)" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">+</button>
+                            <button onclick="removeFromOrder('${item.baseName}')" style="width: 24px; height: 24px; border: 1px solid #444; background: #333; color: #fff; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1;">×</button>
                         </div>
                     </div>
                 `).join('');
                 
-                const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-                cartTotal.textContent = total.toFixed(2);
+                const total = currentOrder.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                orderTotal.textContent = total.toFixed(2);
             }
         }
 
-        function showCartModal() {
-            document.getElementById('cartModal').classList.add('show');
-            updateCartUI();
+        function showOrderModal() {
+            document.getElementById('orderModal').classList.add('show');
+            updateCurrentOrderUI();
         }
 
-        function closeCartModal() {
-            document.getElementById('cartModal').classList.remove('show');
+        function closeOrderModal() {
+            document.getElementById('orderModal').classList.remove('show');
         }
 
-        async function submitOrder() {
+        async function placeOrder() {
             const tableNumber = document.getElementById('tableNumber').value.trim();
             const orderNotes = document.getElementById('orderNotes').value.trim();
             if (!tableNumber) {
                 alert('Please enter your table number.');
                 return;
             }
-            if (cart.length === 0) {
-                alert('Your cart is empty.');
+            if (currentOrder.length === 0) {
+                alert('Your order is empty.');
                 return;
             }
 
             const order = {
                 id: Date.now(),
                 tableNumber: tableNumber,
-                items: [...cart],
-                total: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+                items: [...currentOrder],
+                total: currentOrder.reduce((sum, item) => sum + (item.price * item.quantity), 0),
                 timestamp: new Date().toLocaleString(),
                 notes: orderNotes
             };
@@ -844,18 +896,18 @@
             if (saved) {
                 // Add to local array for immediate UI update
                 orders.push(order);
-                cart = [];
-                updateCartUI();
-                closeCartModal();
+                currentOrder = [];
+                updateCurrentOrderUI();
+                closeOrderModal();
                 document.getElementById('tableNumber').value = '';
                 document.getElementById('orderNotes').value = '';
-                showError(`✅ Order submitted for Table ${tableNumber}!`, false);
+                showError(`✅ Order placed for Table ${tableNumber}!`, false);
                 
                 // Refresh orders list to show the new order
                 await loadOrdersFromServer();
                 updateOrdersUI();
             } else {
-                alert('Failed to save order. Please try again.');
+                alert('Failed to place order. Please try again.');
             }
         }
 
