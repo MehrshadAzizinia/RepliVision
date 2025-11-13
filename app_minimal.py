@@ -269,7 +269,7 @@ class SimpleGoogleDriveStorage:
                 name = file_name.replace('.ply', '')
                 
                 # Get item metadata or use defaults
-                item_meta = self.items_metadata.get(name, {'name': f"Item: {name}", 'price': 0.00, 'category': 'Uncategorized'})
+                item_meta = self.items_metadata.get(name, {'name': f"Item: {name}", 'price': 0.00, 'category': 'Uncategorized', 'description': '', 'available': True})
                 
                 file_size = int(file.get('size', 0))
                 menu_items.append({
@@ -277,6 +277,8 @@ class SimpleGoogleDriveStorage:
                     'display_name': item_meta.get('name', f"Unnamed: {name}"),
                     'price': item_meta.get('price', 0.00),
                     'category': item_meta.get('category', 'Uncategorized'),
+                    'description': item_meta.get('description', ''),
+                    'available': item_meta.get('available', True),
                     'vertex_count': 0,  # Simplified - not extracting PLY metadata
                     'face_count': 0,
                     'has_color': False,
@@ -323,7 +325,9 @@ class SimpleGoogleDriveStorage:
                     self.items_metadata[name] = {
                         'name': f"New Item: {name}",
                         'price': 0.00,
-                        'category': 'Uncategorized'
+                        'category': 'Uncategorized',
+                        'description': '',
+                        'available': True
                     }
                     self._save_items_metadata()
                 
@@ -467,6 +471,8 @@ def update_item(name):
         new_display_name = data.get('name')
         new_price = data.get('price')
         new_category = data.get('category')
+        new_description = data.get('description', '')
+        new_available = data.get('available', True)
 
         if new_display_name is None or new_price is None:
             return jsonify({'success': False, 'error': 'Both "name" and "price" are required.'}), 400
@@ -475,6 +481,10 @@ def update_item(name):
         storage.items_metadata[name]['price'] = float(new_price)
         if new_category is not None:
             storage.items_metadata[name]['category'] = str(new_category)
+        if new_description is not None:
+            storage.items_metadata[name]['description'] = str(new_description)
+        if new_available is not None:
+            storage.items_metadata[name]['available'] = bool(new_available)
         storage._save_items_metadata()
         
         logger.info(f"Updated item '{name}' with new name: '{new_display_name}' and price: {new_price}")
