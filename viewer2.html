@@ -723,8 +723,7 @@
             const descriptionRaw = element.dataset.description || '';
             const availableAttr = element.dataset.available;
             const available = availableAttr === undefined ? true : availableAttr !== 'false';
-            const fileSizeMbRaw = element.dataset.fileSizeMb;
-            const createdAt = element.dataset.createdAt || '';
+            // Removed file size and date variables as requested
 
             const descriptionHtml = descriptionRaw
                 ? descriptionRaw.replace(/\\n/g, '<br>')
@@ -734,15 +733,7 @@
             if (category) {
                 metaParts.push(category);
             }
-            if (fileSizeMbRaw !== undefined && fileSizeMbRaw !== '') {
-                const size = parseFloat(fileSizeMbRaw);
-                if (!isNaN(size)) {
-                    metaParts.push(size.toFixed(2) + ' MB');
-                }
-            }
-            if (createdAt) {
-                metaParts.push(createdAt);
-            }
+            // Removed logic for adding file size and created date to metaParts
 
             let priceText = '';
             if (priceRaw !== undefined && priceRaw !== '' && !isNaN(priceRaw)) {
@@ -1171,13 +1162,16 @@
         initScene();
         checkConnection().then(async conn => { 
             if (conn) {
-                refreshMenuList();
                 // Load orders from server
                 await loadOrdersFromServer();
-                // Initialize UI in menu mode
+                // Initialize UI in menu mode (This triggers loadMenuList internally)
                 updateModeUI();
             }
         });
+        
+        // Automatic refresh 0.5s after page launch
+        setTimeout(refreshMenuList, 500);
+
         setInterval(checkConnection, 30000);
         
         // Auto-refresh orders every 10 seconds for all users
