@@ -506,8 +506,17 @@ def delete_ply(name):
 def update_item(name):
     try:
         data = request.get_json()
+
+        # If this base_name has no metadata yet (e.g., an older PLY like apple.ply),
+        # create a default entry so it can be edited.
         if name not in storage.items_metadata:
-            return jsonify({'success': False, 'error': f"Item '{name}' not found."}), 404
+            storage.items_metadata[name] = {
+                'name': f"Item: {name}",
+                'price': 0.00,
+                'category': 'Uncategorized',
+                'description': '',
+                'available': True
+            }
 
         new_display_name = data.get('name')
         new_price = data.get('price')
@@ -518,14 +527,15 @@ def update_item(name):
         if new_display_name is None or new_price is None:
             return jsonify({'success': False, 'error': 'Both "name" and "price" are required.'}), 400
 
-        storage.items_metadata[name]['name'] = str(new_display_name)
-        storage.items_metadata[name]['price'] = float(new_price)
+        item_meta = storage.items_metadata[name]
+        item_meta['name'] = str(new_display_name)
+        item_meta['price'] = float(new_price)
         if new_category is not None:
-            storage.items_metadata[name]['category'] = str(new_category)
+            item_meta['category'] = str(new_category)
         if new_description is not None:
-            storage.items_metadata[name]['description'] = str(new_description)
+            item_meta['description'] = str(new_description)
         if new_available is not None:
-            storage.items_metadata[name]['available'] = bool(new_available)
+            item_meta['available'] = bool(new_available)
         storage._save_items_metadata()
         
         logger.info(f"Updated item '{name}' with new name: '{new_display_name}' and price: {new_price}")

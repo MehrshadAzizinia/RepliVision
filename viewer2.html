@@ -66,6 +66,41 @@
         .viewer-container { flex: 1; position: relative; background: #1a1a1a; border: 1px solid #333; overflow: hidden; border-radius: 4px; }
         #viewer { width: 100%; height: 100%; border-radius: 4px; position: relative; z-index: 1; }
         #viewer canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        .viewer-details-panel {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            padding: 16px 20px 40px 20px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0));
+            color: #fff;
+            font-size: 12px;
+            z-index: 2;
+            pointer-events: none;
+        }
+        .viewer-item-name {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+        }
+        .viewer-item-price {
+            font-size: 18px;
+            color: #f1c40f;
+            margin-bottom: 4px;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+        }
+        .viewer-item-meta {
+            font-size: 13px;
+            color: #ddd;
+            margin-bottom: 6px;
+        }
+        .viewer-item-description {
+            font-size: 14px;
+            color: #f5f5f5;
+            max-height: 80px;
+            overflow-y: auto;
+        }
         .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: #1a1a1a; border: 1px solid #333; padding: 12px; z-index: 999; border-radius: 4px; }
         .spinner { border: 1px solid #333; border-top: 1px solid #fff; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto 8px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -137,6 +172,9 @@
         
         <div class="viewer-container">
             <div id="viewer"></div>
+            <div class="viewer-details-panel" id="viewerDetails">
+                <div class="empty-state">Select an item to view its details.</div>
+            </div>
             <div class="loading" id="loading" style="display: none;">
                 <div class="spinner"></div>
                 <div id="loadingMessage">Loading...</div>
@@ -262,6 +300,10 @@
         const MANAGER_PASSWORD = '123';
         let currentOrder = [];
         let orders = [];
+
+        // Tracking variable to fix concurrency bug
+        let activeLoadId = 0;
+
 
         // Orders management functions
         async function loadOrdersFromServer() {
@@ -402,8 +444,6 @@
             controls.enableZoom = true;
             controls.enableRotate = true;
             controls.enablePan = true;
-            controls.autoRotate = false;
-            controls.autoRotateSpeed = 2.0;
             window.addEventListener('resize', () => {
                 camera.aspect = container.clientWidth / container.clientHeight;
                 camera.updateProjectionMatrix();
@@ -413,6 +453,7 @@
         }
         function animate() {
             requestAnimationFrame(animate);
+
             controls.update();
             renderer.render(scene, camera);
         }
@@ -483,32 +524,43 @@
                 `;
                 
                 categoryItems.forEach(item => {
-                    console.log('Processing item:', item); // Debug log
-                    
                     // Generate base_name if it's missing or invalid
                     if (!item.base_name || item.base_name === 'null' || item.base_name === 'undefined' || item.base_name.trim() === '') {
                         // Use display_name as fallback, removing spaces and special chars
                         const fallbackName = (item.display_name || item.file_id || 'unnamed_item').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
                         item.base_name = fallbackName;
-                        console.warn('Generated fallback base_name:', item.base_name, 'for item:', item); // Debug log
                     }
                     
                     // Additional validation to ensure base_name is never empty
                     if (!item.base_name || item.base_name.trim() === '') {
-                        console.error('Critical error: base_name is still empty after fallback for item:', item);
                         item.base_name = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                        console.warn('Emergency fallback base_name:', item.base_name);
                     }
                     
                     const price = typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : 'N/A';
                     const isAvailable = item.available !== false; // Default to true if undefined
                     // Escape quotes for onclick handlers
-                    const safeDisplayName = (item.display_name || '').replace(/'/g, "\\'");
-                    const safeBaseName = item.base_name.replace(/'/g, "\\'");
-                    const safeDescription = (item.description || '').replace(/'/g, "\\'");
+                    const safeDisplayName = (item.display_name || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+                    const safeBaseName = item.base_name.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+                    const rawDescription = item.description || '';
+                    const descriptionForHtml = rawDescription || 'No description available';
+                    const safeDescriptionForJs = rawDescription.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, '\\n');
+                    const rawCategory = item.category || 'Uncategorized';
+                    const safeCategoryForJs = rawCategory.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+                    const priceForData = typeof item.price === 'number' ? item.price.toFixed(2) : '';
+                    const fileSizeForData = typeof item.file_size_mb === 'number' ? item.file_size_mb.toFixed(4) : '';
+                    const createdAtForData = item.created_at || '';
 
                     html += `
-                        <div class="file-item ${!isAvailable ? 'item-unavailable' : ''}" id="item-${safeBaseName}" onclick="loadPLYFile('${safeBaseName}', this)">
+                        <div class="file-item ${!isAvailable ? 'item-unavailable' : ''}"
+                             id="item-${safeBaseName}"
+                             onclick="loadPLYFile('${safeBaseName}', this)"
+                             data-display-name="${safeDisplayName}"
+                             data-price="${priceForData}"
+                             data-category="${safeCategoryForJs}"
+                             data-description="${safeDescriptionForJs}"
+                             data-available="${isAvailable}"
+                             data-file-size-mb="${fileSizeForData}"
+                             data-created-at="${createdAtForData}">
                             <div class="item-details">
                                 <div class="item-name">
                                     ${item.display_name}
@@ -516,7 +568,7 @@
                                 </div>
                                 <div class="item-price">${price}</div>
                                 <div class="item-info">
-                                    ${safeDescription ? safeDescription : 'No description available'}
+                                    ${descriptionForHtml}
                                 </div>
                             </div>
                             <div class="item-actions">
@@ -524,7 +576,7 @@
                                     <button class="action-btn add-to-order-btn" title="Add to Order" onclick="event.stopPropagation(); addToOrder('${safeBaseName}', '${safeDisplayName}', ${item.price})">+</button>
                                 ` : ''}
                                 ${isManagerMode ? `
-                                    <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price}, '${item.category || 'Uncategorized'}', '${safeDescription}', ${isAvailable})">✏️</button>
+                                    <button class="action-btn edit-btn" title="Edit Item" onclick="event.stopPropagation(); showEditModal('${safeBaseName}', '${safeDisplayName}', ${item.price}, '${safeCategoryForJs}', '${safeDescriptionForJs}', ${isAvailable})">✏️</button>
                                     <button class="action-btn delete-btn" title="Delete Item" onclick="event.stopPropagation(); showDeleteModal('${safeBaseName}', '${safeDisplayName}');">×</button>
                                 ` : ''}
                             </div>
@@ -542,28 +594,36 @@
         }
 
         async function loadPLYFile(baseName, element) {
+            // 1. Increment global load ID. This specific function call now owns "thisLoadId"
+            activeLoadId++; 
+            const thisLoadId = activeLoadId;
+
             // Lazy loading: Check if model is already loaded
             if (selectedBaseName === baseName && currentObject) {
                 // Model already loaded, just select it
                 document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
                 element.classList.add('selected');
+                updateSelectedItemDetails(element);
                 return;
             }
 
             showLoading(true, 'Loading 3D Model...');
-            if (currentObject) scene.remove(currentObject);
+            
+            // Immediately remove current object
+            if (currentObject) {
+                scene.remove(currentObject);
+                currentObject = null;
+            }
 
             selectedBaseName = baseName;
             document.querySelectorAll('.file-item').forEach(item => item.classList.remove('selected'));
             element.classList.add('selected');
+            updateSelectedItemDetails(element);
 
-            // Create AbortController for cancellation
-            const abortController = new AbortController();
-            
             try {
                 const loader = new THREE.PLYLoader();
                 
-                // Load with timeout and cancellation support
+                // Load with timeout and cancellation check
                 const geometry = await new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
                         reject(new Error('Loading timeout'));
@@ -576,7 +636,10 @@
                         },
                         (xhr) => {
                             const progress = Math.round(xhr.loaded / xhr.total * 100);
-                            showLoading(true, `Loading: ${progress}%`);
+                            // Only update UI if this is still the active request
+                            if (thisLoadId === activeLoadId) {
+                                showLoading(true, `Loading: ${progress}%`);
+                            }
                         },
                         (error) => {
                             clearTimeout(timeout);
@@ -584,6 +647,12 @@
                         }
                     );
                 });
+
+                // 2. CRITICAL CHECK: If another file was clicked while this was downloading, STOP.
+                if (thisLoadId !== activeLoadId) {
+                    console.log('Request cancelled: newer file requested');
+                    return; 
+                }
 
                 // Process geometry
                 geometry.computeBoundingBox();
@@ -602,6 +671,12 @@
                     object = new THREE.Mesh(geometry, material);
                 }
                 
+                // Double check just to be safe before modifying scene
+                if (thisLoadId !== activeLoadId) return;
+
+                // Make sure scene is clear (redundant but safe)
+                if (currentObject) scene.remove(currentObject);
+
                 currentObject = object;
                 
                 // Fix upside-down orientation - rotate 180 degrees around X-axis
@@ -617,14 +692,76 @@
                 showLoading(false);
                 
             } catch (error) {
-                console.error('Failed to load PLY model:', error);
-                showError('Failed to load 3D model. Please try again.');
-                showLoading(false);
-                
-                // Reset selection on error
-                selectedBaseName = null;
-                element.classList.remove('selected');
+                // Only show error if this is still the active request
+                if (thisLoadId === activeLoadId) {
+                    console.error('Failed to load PLY model:', error);
+                    showError('Failed to load 3D model. Please try again.');
+                    showLoading(false);
+                    
+                    // Reset selection on error
+                    selectedBaseName = null;
+                    element.classList.remove('selected');
+                    updateSelectedItemDetails(null);
+                }
             }
+        }
+
+        function updateSelectedItemDetails(element) {
+            const container = document.getElementById('viewerDetails');
+            if (!container) {
+                return;
+            }
+
+            if (!element) {
+                container.innerHTML = '<div class="empty-state">Select an item to view its details.</div>';
+                return;
+            }
+
+            const name = element.dataset.displayName || (element.querySelector('.item-name') ? element.querySelector('.item-name').textContent.trim() : '');
+            const priceRaw = element.dataset.price;
+            const category = element.dataset.category || 'Uncategorized';
+            const descriptionRaw = element.dataset.description || '';
+            const availableAttr = element.dataset.available;
+            const available = availableAttr === undefined ? true : availableAttr !== 'false';
+            const fileSizeMbRaw = element.dataset.fileSizeMb;
+            const createdAt = element.dataset.createdAt || '';
+
+            const descriptionHtml = descriptionRaw
+                ? descriptionRaw.replace(/\\n/g, '<br>')
+                : 'No description available';
+
+            const metaParts = [];
+            if (category) {
+                metaParts.push(category);
+            }
+            if (fileSizeMbRaw !== undefined && fileSizeMbRaw !== '') {
+                const size = parseFloat(fileSizeMbRaw);
+                if (!isNaN(size)) {
+                    metaParts.push(size.toFixed(2) + ' MB');
+                }
+            }
+            if (createdAt) {
+                metaParts.push(createdAt);
+            }
+
+            let priceText = '';
+            if (priceRaw !== undefined && priceRaw !== '' && !isNaN(priceRaw)) {
+                priceText = '$' + parseFloat(priceRaw).toFixed(2);
+            }
+
+            let metaHtml = '';
+            if (metaParts.length) {
+                metaHtml = '<div class="viewer-item-meta">' + metaParts.join(' • ') + '</div>';
+            }
+
+            container.innerHTML =
+                '<div class="viewer-item-name">' +
+                    (name || '') +
+                    (available ? '' : ' <span class="unavailable-badge">Unavailable</span>') +
+                '</div>' +
+                '<div class="viewer-item-price">' + priceText + '</div>' +
+                metaHtml +
+                '<div class="viewer-item-description">' + descriptionHtml + '</div>';
         }
 
         async function uploadFile() {
@@ -674,22 +811,18 @@
         }
         function closeDeleteModal() { document.getElementById('deleteModal').classList.remove('show'); fileToDelete = null; }
         
-        // --- START OF FIX ---
         async function confirmDelete() {
             if (!fileToDelete) {
                 showError('Cannot delete: Invalid item name.');
                 return;
             }
 
-            // Capture the value in a local variable before it's cleared.
             const itemNameToDelete = fileToDelete;
 
-            // Now it's safe to close the modal and clear the global state.
             closeDeleteModal();
             showLoading(true, 'Deleting item...');
 
             try {
-                // Use the captured local variable for the API call.
                 const response = await fetch(`${API_URL}/api/delete-ply/${itemNameToDelete}`, { method: 'DELETE' });
                 const data = await response.json();
                 if (data.success) {
@@ -710,7 +843,6 @@
                 showLoading(false); 
             }
         }
-        // --- END OF FIX ---
 
         function showEditModal(baseName, currentName, currentPrice, currentCategory, currentDescription, currentAvailable) {
             if (!isManagerMode) {
@@ -719,7 +851,9 @@
             }
             itemToEdit = baseName;
             document.getElementById('editItemName').value = currentName;
-            document.getElementById('editItemPrice').value = currentPrice.toFixed(2);
+            const priceInput = document.getElementById('editItemPrice');
+            const numericPrice = typeof currentPrice === 'number' ? currentPrice : parseFloat(currentPrice);
+            priceInput.value = !isNaN(numericPrice) ? numericPrice.toFixed(2) : '0.00';
             document.getElementById('editItemCategory').value = currentCategory || 'Uncategorized';
             document.getElementById('editItemDescription').value = currentDescription || '';
             document.getElementById('editItemAvailable').checked = currentAvailable !== false; // Default to true if undefined
@@ -727,11 +861,9 @@
         }
         function closeEditModal() { document.getElementById('editModal').classList.remove('show'); itemToEdit = null; }
         
-        // --- START OF FIX ---
         async function saveItemChanges() {
             if (!itemToEdit) return;
 
-            // Capture the item's name in a local variable before the modal is closed.
             const itemBaseNameToUpdate = itemToEdit; 
 
             const newName = document.getElementById('editItemName').value.trim();
@@ -745,12 +877,10 @@
                 return;
             }
 
-            // Now it's safe to close the modal and clear the global state.
             closeEditModal(); 
             showLoading(true, 'Saving changes...');
             
             try {
-                // Use the captured local variable for the API call.
                 const response = await fetch(`${API_URL}/api/update-item/${itemBaseNameToUpdate}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -770,7 +900,6 @@
                 showLoading(false); 
             }
         }
-        // --- END OF FIX ---
 
         // Performance optimizations
         let refreshTimeout = null;
@@ -784,10 +913,8 @@
         
         function refreshMenuList() { 
             loadMenuList(); 
-            // This function was empty in the original file, so keeping it that way.
-            // loadStorageInfo(); 
         }
-        async function loadStorageInfo() { /* Unchanged */ } // This can remain as-is
+        async function loadStorageInfo() { /* Unchanged */ }
 
         function showLoading(show, msg = 'Loading...') {
             document.getElementById('loading').style.display = show ? 'block' : 'none';
