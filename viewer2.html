@@ -257,23 +257,15 @@
             -webkit-line-clamp: 2; /* Limit to 2 lines */
             -webkit-box-orient: vertical;
             overflow: hidden;
-            padding-right: 20px; /* Space for hover actions */
         }
 
         .item-actions {
-            position: absolute;
-            top: 8px;
-            right: 8px;
             display: flex;
-            gap: 2px;
-            opacity: 0;
-            transition: opacity 0.2s;
-            background: rgba(0,0,0,0.6);
-            border-radius: 4px;
-            backdrop-filter: blur(2px);
-            z-index: 2;
+            gap: 6px;
+            justify-content: flex-end;
+            width: 100%;
+            margin-top: 8px;
         }
-        .file-item:hover .item-actions { opacity: 1; }
 
         .icon-btn {
             width: 22px;
@@ -282,8 +274,14 @@
             justify-content: center;
             border-radius: 4px;
             color: var(--text-main);
+            border: 1px solid var(--border-subtle);
+            background: rgba(255, 255, 255, 0.05);
         }
-        .icon-btn:hover { background: var(--accent-primary); }
+        .icon-btn:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: #fff;
+        }
 
         /* Main View (3D) */
         .viewer-area {
