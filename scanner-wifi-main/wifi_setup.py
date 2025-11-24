@@ -576,7 +576,24 @@ def connect_to_wifi(ssid, password):
     # The WiFi interface cannot be in both AP mode and client mode simultaneously
     logger.info(f"Deactivating Access Point mode...")
     run_command(f"nmcli connection down '{AP_CON_NAME}' 2>/dev/null")
-    time.sleep(2)  # Give it time to fully shut down
+    time.sleep(3)  # Give it time to fully shut down
+
+    # Rescan for WiFi networks after shutting down AP
+    logger.info(f"Rescanning for WiFi networks...")
+    run_command(f"nmcli device wifi rescan")
+    time.sleep(2)  # Wait for scan to complete
+
+    # Verify the network is visible
+    logger.info(f"Verifying network '{ssid}' is visible...")
+    success_scan, output_scan, _ = run_command(f"nmcli -t -f SSID device wifi list")
+    if success_scan:
+        available_networks = [line.strip() for line in output_scan.strip().split('\n')]
+        if ssid not in available_networks:
+            logger.error(f"Network '{ssid}' not found in scan results")
+            logger.info(f"Available networks: {available_networks[:10]}")  # Log first 10
+            update_status(f"Error: Network '{ssid}' not found")
+            return False, f"Network '{ssid}' not visible. Please check the SSID and try again."
+        logger.info(f"Network '{ssid}' found in scan")
 
     # Create a persistent WiFi connection profile
     connection_name = f"WiFi-{ssid}"
