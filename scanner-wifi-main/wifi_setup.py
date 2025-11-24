@@ -576,68 +576,48 @@ def connect_to_wifi(ssid, password):
     # The WiFi interface cannot be in both AP mode and client mode simultaneously
     logger.info(f"Deactivating Access Point mode...")
     run_command(f"nmcli connection down '{AP_CON_NAME}' 2>/dev/null")
-    time.sleep(3)  # Give it time to fully shut down
+    run_command(f"nmcli connection delete '{AP_CON_NAME}' 2>/dev/null")
+    time.sleep(2)
 
-    # Rescan for WiFi networks after shutting down AP
-    logger.info(f"Rescanning for WiFi networks...")
-    run_command(f"nmcli device wifi rescan")
-    time.sleep(2)  # Wait for scan to complete
-
-    # Verify the network is visible
-    logger.info(f"Verifying network '{ssid}' is visible...")
-    success_scan, output_scan, _ = run_command(f"nmcli -t -f SSID device wifi list")
-    if success_scan:
-        available_networks = [line.strip() for line in output_scan.strip().split('\n')]
-        if ssid not in available_networks:
-            logger.error(f"Network '{ssid}' not found in scan results")
-            logger.info(f"Available networks: {available_networks[:10]}")  # Log first 10
-            update_status(f"Error: Network '{ssid}' not found")
-            return False, f"Network '{ssid}' not visible. Please check the SSID and try again."
-        logger.info(f"Network '{ssid}' found in scan")
-
-    # Create a persistent WiFi connection profile
-    connection_name = f"WiFi-{ssid}"
-
-    # Delete any existing connection with this SSID to avoid conflicts
-    run_command(f"nmcli connection delete '{connection_name}' 2>/dev/null")
-
-    # Create a new connection profile that will persist
-    cmd_create = (
-        f"nmcli connection add type wifi con-name '{connection_name}' "
-        f"ifname {WIFI_INTERFACE} ssid '{ssid}' "
-        f"wifi-sec.key-mgmt wpa-psk wifi-sec.psk '{password}' "
-        f"connection.autoconnect yes "
-        f"connection.autoconnect-priority 100"
-    )
-    
-    success_create, output_create, error_create = run_command(cmd_create)
-    
-    if not success_create:
-        logger.error(f"Failed to create WiFi connection profile: {error_create}")
-        update_status(f"Error: Failed to create connection for {ssid}")
-        return False, f"Failed to create connection: {error_create}"
-    
-    logger.info(f"Created persistent WiFi connection profile: {connection_name}")
+    # Reset the WiFi interface to ensure clean state
+    logger.info(f"Resetting WiFi interface...")
+    run_command(f"nmcli device set {WIFI_INTERFACE} managed yes")
+    run_command(f"nmcli radio wifi off")
     time.sleep(1)
-    
-    # Now activate the connection
-    cmd_connect = f"nmcli connection up '{connection_name}'"
+    run_command(f"nmcli radio wifi on")
+    time.sleep(3)
+
+    # Rescan for WiFi networks
+    logger.info(f"Scanning for WiFi networks...")
+    run_command(f"nmcli device wifi rescan")
+    time.sleep(3)  # Wait longer for scan to complete
+
+    # Use the direct connect method - this is more reliable
+    logger.info(f"Connecting to '{ssid}' using direct method...")
+
+    # Use nmcli device wifi connect which handles everything in one step
+    cmd_connect = f"nmcli device wifi connect '{ssid}' password '{password}'"
     success, output, error = run_command(cmd_connect)
-    
+
     if success:
-        logger.info(f"Successfully initiated connection to {ssid}")
-        update_status(f"Connecting to {ssid}...")
-        
-        # Save configuration marker, even if internet isn't fully verified yet
+        logger.info(f"Successfully connected to {ssid}")
+        update_status(f"Connected to {ssid}")
+
+        # Save configuration marker
         save_wifi_config(ssid)
-        
-        return True, "Connection initiated"
+
+        return True, "Connection successful"
     else:
         logger.error(f"Failed to connect: {error}")
-        # Clean up the failed connection profile
-        run_command(f"nmcli connection delete '{connection_name}' 2>/dev/null")
         update_status(f"Error: Failed to connect to {ssid}")
-        return False, error
+
+        # Try to provide more helpful error message
+        if "not found" in error.lower():
+            return False, f"Network '{ssid}' not found. Make sure your hotspot is on and in range."
+        elif "secrets" in error.lower():
+            return False, "Incorrect password. Please check your WiFi password and try again."
+        else:
+            return False, f"Connection failed: {error}"
 
 
 def check_internet_connection():
