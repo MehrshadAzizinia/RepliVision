@@ -571,13 +571,19 @@ def start_ap_mode():
 def connect_to_wifi(ssid, password):
     """Connect to WiFi network and save it persistently"""
     logger.info(f"Attempting to connect to: {ssid}")
-    
+
+    # IMPORTANT: Deactivate the AP mode FIRST before connecting to client WiFi
+    # The WiFi interface cannot be in both AP mode and client mode simultaneously
+    logger.info(f"Deactivating Access Point mode...")
+    run_command(f"nmcli connection down '{AP_CON_NAME}' 2>/dev/null")
+    time.sleep(2)  # Give it time to fully shut down
+
     # Create a persistent WiFi connection profile
     connection_name = f"WiFi-{ssid}"
-    
+
     # Delete any existing connection with this SSID to avoid conflicts
     run_command(f"nmcli connection delete '{connection_name}' 2>/dev/null")
-    
+
     # Create a new connection profile that will persist
     cmd_create = (
         f"nmcli connection add type wifi con-name '{connection_name}' "
