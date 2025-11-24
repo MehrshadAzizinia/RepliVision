@@ -594,36 +594,42 @@ def connect_to_wifi(ssid, password):
     run_command(f"nmcli device wifi rescan")  # Scan twice to be sure
     time.sleep(3)
 
-    # Debug: Log what networks are actually visible
-    success_list, networks_output, _ = run_command(f"nmcli -t -f SSID device wifi list")
+    # Get network details including BSSID (MAC address) - this is more reliable
+    success_list, networks_output, _ = run_command(f"nmcli -t -f SSID,BSSID,SIGNAL device wifi list")
+    bssid = None
+
     if success_list:
-        visible_networks = [n.strip() for n in networks_output.strip().split('\n') if n.strip()]
+        visible_networks = networks_output.strip().split('\n')
         logger.info(f"Visible networks count: {len(visible_networks)}")
         logger.info(f"Looking for: '{ssid}'")
-        logger.info(f"First 10 networks: {visible_networks[:10]}")
 
-        # Check if SSID exists (case-insensitive)
+        # Find the network and get its BSSID
         ssid_lower = ssid.lower()
-        found = False
         for net in visible_networks:
-            if net.lower() == ssid_lower:
-                logger.info(f"Found exact match: '{net}'")
-                found = True
-                # Use the exact SSID as it appears in the scan
-                ssid = net
-                break
+            parts = net.split(':')
+            if len(parts) >= 2:
+                net_ssid = parts[0].strip()
+                # BSSID is parts[1] through parts[6] (MAC address format)
+                if len(parts) >= 7:
+                    net_bssid = ':'.join(parts[1:7])
+                    net_signal = parts[7] if len(parts) > 7 else 'unknown'
 
-        if not found:
+                    if net_ssid.lower() == ssid_lower:
+                        logger.info(f"Found network: SSID='{net_ssid}', BSSID={net_bssid}, Signal={net_signal}")
+                        ssid = net_ssid  # Use exact SSID from scan
+                        bssid = net_bssid
+                        break
+
+        if not bssid:
             logger.error(f"Network '{ssid}' not found in scan results!")
-            logger.error(f"Please make sure your hotspot is on and set to 2.4GHz (not 5GHz only)")
             update_status(f"Error: Network '{ssid}' not visible")
             return False, f"Network '{ssid}' not found. Check hotspot is on and using 2.4GHz band."
 
-    # Use the direct connect method - this is more reliable
-    logger.info(f"Connecting to '{ssid}' using direct method...")
+    # Use BSSID to connect - this is more reliable than SSID alone
+    logger.info(f"Connecting to '{ssid}' (BSSID: {bssid}) using direct method...")
 
-    # Use nmcli device wifi connect which handles everything in one step
-    cmd_connect = f"nmcli device wifi connect '{ssid}' password '{password}'"
+    # Connect using BSSID which is more reliable
+    cmd_connect = f"nmcli device wifi connect '{bssid}' password '{password}'"
     success, output, error = run_command(cmd_connect)
 
     if success:
