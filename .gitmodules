@@ -1,0 +1,6 @@
+[submodule "Reconstruction/Reconstruction/Pi3"]
+	path = Reconstruction/Reconstruction/Pi3
+	url = https://github.com/yyfz/Pi3.git
+[submodule "Reconstruction/Pi3"]
+	path = Reconstruction/Pi3
+	url = https://github.com/yyfz/Pi3.git
