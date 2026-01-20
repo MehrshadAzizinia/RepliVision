@@ -28,3 +28,7 @@ Flask-based web server with a Three.js 3D viewer frontend. Provides a digital me
 **Web App:** Install dependencies with `pip install -r requirements.txt` and run `python3 appRender.py` to start the web server.
 
 See the full project documentation in `RepliVision-FinalReport.pdf` for detailed information about the system design, testing, and implementation.
+
+---
+
+Special thanks to the creator of [Pi3](https://github.com/yyfz/Pi3.git) for the photogrammetry library that powers our 3D reconstruction.
