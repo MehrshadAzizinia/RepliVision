@@ -56,6 +56,8 @@ class SimpleGoogleDriveStorage:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
+                # NOTE: This will fail on Render if token.pickle doesn't exist.
+                # Must generate token.pickle locally and upload it to Render.
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_file, SCOPES)
                 creds = flow.run_local_server(port=0)
@@ -284,7 +286,7 @@ class SimpleGoogleDriveStorage:
                     'category': item_meta.get('category', 'Uncategorized'),
                     'description': item_meta.get('description', ''),
                     'available': item_meta.get('available', True),
-                    'vertex_count': 0,  # Simplified - not extracting PLY metadata
+                    'vertex_count': 0,  
                     'face_count': 0,
                     'has_color': False,
                     'file_size_mb': file_size / (1024**2),
@@ -300,7 +302,6 @@ class SimpleGoogleDriveStorage:
             logger.error(f"Error listing files: {error}")
             return []
     
-    # --- START OF REFACTOR ---
     def store_ply_file(self, name, file_path, metadata=None):
         try:
             with open(file_path, 'rb') as f:
@@ -317,8 +318,6 @@ class SimpleGoogleDriveStorage:
                     fields='id'
                 ).execute()
                 
-                # This is the only metadata that matters for item properties.
-                # We no longer add the PLY file to the fragile metadata_index.json.
                 if name not in self.items_metadata:
                     self.items_metadata[name] = {
                         'name': f"New Item: {name}",
@@ -337,26 +336,25 @@ class SimpleGoogleDriveStorage:
     
     def delete_ply_file(self, name):
         try:
-            # Step 1: Find the .ply file directly in Google Drive to get its ID.
+            # Step 1: Find the .ply file directly in Google Drive to get its ID
             query = f"name='{name}.ply' and '{self.folder_id}' in parents and trashed=false"
             results = self.service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
             files = results.get('files', [])
             
             if not files:
-                # File doesn't exist on Drive, but the metadata entry might. Clean it up.
                 if name in self.items_metadata:
                     del self.items_metadata[name]
                     self._save_items_metadata()
                     logger.info(f"Removed orphaned metadata entry for '{name}'.")
                 raise FileNotFoundError(f"PLY file '{name}.ply' not found in Google Drive.")
             
-            # If found, delete the actual file from Drive.
+            # If found, delete the actual file from Drive
             file_to_delete = files[0]
             file_id = file_to_delete['id']
             self.service.files().delete(fileId=file_id).execute()
             logger.info(f"Successfully deleted .ply file with ID '{file_id}' from Google Drive.")
 
-            # Step 2: Delete the corresponding metadata from items.txt.
+            # Step 2: Delete the corresponding metadata from items.txt
             if name in self.items_metadata:
                 del self.items_metadata[name]
                 self._save_items_metadata()
@@ -364,11 +362,10 @@ class SimpleGoogleDriveStorage:
 
         except HttpError as error:
             logger.error(f"An API error occurred during file deletion: {error}")
-            raise # Re-raise the exception to be handled by the Flask route.
+            raise # Re-raise the exception to be handled by the Flask route
         except Exception as e:
             logger.error(f"An unexpected error occurred in delete_ply_file: {e}")
             raise
-    # --- END OF REFACTOR ---
     
     def get_storage_info(self):
         try:
@@ -391,13 +388,10 @@ class SimpleGoogleDriveStorage:
 # Global storage instance
 storage = SimpleGoogleDriveStorage()
 
+# MODIFIED: serve the HTML file on the root path
 @app.route('/', methods=['GET'])
 def index():
-    return jsonify({
-        'status': 'running',
-        'message': 'Simple Google Drive PLY Menu API',
-        'version': '1.0'
-    })
+    return send_file('viewerRender.html')
 
 @app.route('/api/list-items', methods=['GET'])
 def list_items():
@@ -412,14 +406,13 @@ def list_items():
         logger.error(f"Error in list_items: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# --- START OF REFACTOR ---
 @app.route('/api/download-ply/<name>', methods=['GET'])
 def download_ply(name):
     try:
         if not name or name in ['null', 'undefined', '']:
             return jsonify({'success': False, 'error': 'Invalid item name provided for download.'}), 400
 
-        # Query Drive to get the file_id directly, making it more robust.
+        # Query Drive to get the file_id directly
         query = f"name='{name}.ply' and '{storage.folder_id}' in parents and trashed=false"
         results = storage.service.files().list(q=query, spaces='drive', fields='files(id)').execute()
         files = results.get('files', [])
@@ -457,7 +450,6 @@ def upload_ply():
             return jsonify({'success': False, 'error': 'No file provided'}), 400
         
         file = request.files['file']
-        # Sanitize the name to be used as a base_name (key)
         name = os.path.splitext(file.filename)[0]
         
         if not file.filename.endswith('.ply'):
@@ -466,7 +458,6 @@ def upload_ply():
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix='.ply') as tmp:
             file.save(tmp.name)
-            # Use the refactored, simpler store method
             storage.store_ply_file(name=name, file_path=tmp.name)
             os.unlink(tmp.name)
         
@@ -488,27 +479,22 @@ def delete_ply(name):
         if not name or name in ['null', 'undefined', '']:
             return jsonify({'success': False, 'error': 'Invalid item name provided for deletion.'}), 400
         
-        # Delegate all logic to the new robust storage method
         storage.delete_ply_file(name)
         return jsonify({'success': True, 'message': f"Successfully deleted item '{name}' and its metadata."})
 
     except FileNotFoundError as e:
         logger.warning(f"File not found during deletion attempt: {e}")
-        # The user's goal is for the item to be gone. From their perspective, this is a success.
         return jsonify({'success': True, 'message': f"Item '{name}' was already deleted or did not exist."})
     
     except Exception as e:
         logger.error(f"An error occurred in the delete_ply endpoint: {e}")
         return jsonify({'success': False, 'error': f"An unexpected server error occurred: {e}"}), 500
-# --- END OF REFACTOR ---
 
 @app.route('/api/update-item/<name>', methods=['POST'])
 def update_item(name):
     try:
         data = request.get_json()
 
-        # If this base_name has no metadata yet (e.g., an older PLY like apple.ply),
-        # create a default entry so it can be edited.
         if name not in storage.items_metadata:
             storage.items_metadata[name] = {
                 'name': f"Item: {name}",
@@ -608,4 +594,6 @@ def storage_info():
 
 if __name__ == '__main__':
     print("🚀 Simple Google Drive PLY Menu API Server")
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    # MODIFIED: Use os.environ for Port
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host='0.0.0.0', port=port)
